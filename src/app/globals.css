@@ -86,6 +86,28 @@ h2 {
   padding: 0 18px;
 }
 
+.action-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.secondary-action {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--foreground);
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 44px;
+  padding: 0 18px;
+}
+
+.secondary-action:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .workspace {
   align-items: start;
   display: grid;
@@ -150,6 +172,13 @@ select {
   width: 100%;
 }
 
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  min-height: auto;
+  padding: 0;
+  width: 18px;
+}
+
 input:focus,
 select:focus,
 button:focus-visible {
@@ -160,6 +189,32 @@ button:focus-visible {
 .results-column {
   display: grid;
   gap: 18px;
+}
+
+.equipment-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 20px;
+}
+
+.check-option,
+.lot-check {
+  align-items: center;
+  background: #fffaf1;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: flex;
+  gap: 10px;
+  min-height: 42px;
+  padding: 9px 11px;
+}
+
+.check-option span,
+.lot-check span {
+  color: var(--foreground);
+  font-size: 0.88rem;
+  font-weight: 600;
 }
 
 .result-hero {
@@ -325,6 +380,19 @@ button:focus-visible {
   gap: 10px;
 }
 
+.history-item {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 90px minmax(0, 1fr);
+}
+
+.lot-check {
+  cursor: pointer;
+  justify-content: center;
+  padding: 8px;
+}
+
 .history-list button {
   background: #fffaf1;
   border: 1px solid var(--line);
@@ -342,14 +410,55 @@ button:focus-visible {
   font-size: 0.82rem;
 }
 
+.variable-list {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.variable-list p {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.variable-list strong {
+  color: var(--foreground);
+}
+
+.group-panel {
+  margin-top: 18px;
+}
+
+.group-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 0.75fr 1.25fr;
+}
+
+.group-alerts {
+  grid-column: 1 / -1;
+}
+
+.group-count {
+  display: block;
+  font-size: clamp(1.7rem, 3vw, 2.8rem);
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
 @media (max-width: 1100px) {
   .workspace,
-  .lower-grid {
+  .lower-grid,
+  .group-grid {
     grid-template-columns: 1fr;
   }
 
   .form-grid,
-  .form-grid.times {
+  .form-grid.times,
+  .equipment-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -364,10 +473,17 @@ button:focus-visible {
     flex-direction: column;
   }
 
+  .action-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .form-grid,
   .form-grid.times,
+  .equipment-grid,
   .mc-grid,
-  .stage-row {
+  .stage-row,
+  .history-item {
     grid-template-columns: 1fr;
   }
 

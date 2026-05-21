@@ -8,36 +8,49 @@ export type ProductKey =
   | "pan_cuadrado";
 
 export type RecipeKey = "premezcla_4" | "premezcla_6" | "premezcla_8";
-
 export type WaterMode = "agua" | "hielo";
+export type NumberField = number | null;
+
+export type EquipmentKey =
+  | "amasadora_1"
+  | "amasadora_2"
+  | "amasadora_3"
+  | "porcionadores"
+  | "laminadoras"
+  | "sobadoras"
+  | "horno_1"
+  | "horno_2"
+  | "horno_3";
 
 export type ProcessInput = {
   fecha: string;
   lote: string;
   producto: ProductKey;
   amasadora: "1" | "2" | "3";
-  temperaturaArea: number;
-  humedadRelativa: number;
+  horno: "1" | "2" | "3";
+  temperaturaArea: NumberField;
+  humedadRelativa: NumberField;
   horaInicioAmasado: string;
   receta: RecipeKey;
-  pesoPremezcla: number;
-  tiempoMezclado: number;
+  pesoPremezcla: NumberField;
+  tiempoMezclado: NumberField;
   agregado: WaterMode;
-  temperaturaMasa: number;
-  tiempoPicado: number;
-  tiempoPorcionado: number;
-  tiempoBoleado: number;
-  tiempoFermentacion: number;
-  tiempoHorno: number;
-  temperaturaHorno: number;
-  tiempoTraslado: number;
-  operariosBoleado: number;
+  temperaturaMasa: NumberField;
+  tiempoPicado: NumberField;
+  tiempoPorcionado: NumberField;
+  tiempoBoleado: NumberField;
+  tiempoFermentacion: NumberField;
+  tiempoHorno: NumberField;
+  temperaturaHorno: NumberField;
+  tiempoTraslado: NumberField;
+  operariosBoleado: NumberField;
+  equiposDanados: EquipmentKey[];
 };
 
 export type StageResult = {
   id: string;
   name: string;
-  value: number;
+  value: NumberField;
   min?: number;
   max?: number;
   target: number;
@@ -47,18 +60,33 @@ export type StageResult = {
   note: string;
 };
 
+export type MonteCarloVariable = {
+  name: string;
+  variation: string;
+};
+
+export type MonteCarloResult = {
+  iterations: number;
+  p50: number;
+  p90: number;
+  delayProbability: number;
+  bottleneckFrequency: Array<{ stage: string; probability: number }>;
+  variables: MonteCarloVariable[];
+};
+
 export type AnalysisResult = {
   bottleneck: StageResult;
   stages: StageResult[];
   alerts: string[];
   suggestions: string[];
-  monteCarlo: {
-    iterations: number;
-    p50: number;
-    p90: number;
-    delayProbability: number;
-    bottleneckFrequency: Array<{ stage: string; probability: number }>;
-  };
+  monteCarlo: MonteCarloResult;
+};
+
+export type GroupAnalysisResult = {
+  lotCount: number;
+  alerts: string[];
+  topBottlenecks: Array<{ stage: string; lots: number }>;
+  monteCarlo: MonteCarloResult;
 };
 
 export const products: Record<ProductKey, string> = {
@@ -75,6 +103,18 @@ export const recipes: Record<RecipeKey, string> = {
   premezcla_4: "Pre-mezcla de 4",
   premezcla_6: "Pre-mezcla de 6",
   premezcla_8: "Pre-mezcla de 8",
+};
+
+export const equipmentOptions: Record<EquipmentKey, string> = {
+  amasadora_1: "Amasadora 1",
+  amasadora_2: "Amasadora 2",
+  amasadora_3: "Amasadora 3",
+  porcionadores: "Porcionadores",
+  laminadoras: "Laminadoras",
+  sobadoras: "Sobadoras",
+  horno_1: "Horno 1",
+  horno_2: "Horno 2",
+  horno_3: "Horno 3",
 };
 
 const premixRanges: Record<RecipeKey, { min: number; max: number }> = {
@@ -103,7 +143,28 @@ const ovenTimeRanges: Record<ProductKey, { min: number; max: number }> = {
   pan_cuadrado: { min: 30, max: 33 },
 };
 
-function ovenTemperatureRange(product: ProductKey, oven: ProcessInput["amasadora"]) {
+const monteCarloVariables: MonteCarloVariable[] = [
+  { name: "Tiempo de mezclado", variation: "variación operativa de ±11 %" },
+  { name: "Tiempo de picado con reposo", variation: "variación operativa de ±11 %" },
+  { name: "Tiempo de porcionado", variation: "variación operativa de ±11 %" },
+  { name: "Tiempo de boleado", variation: "variación operativa de ±11 %" },
+  { name: "Tiempo de fermentación", variation: "variación térmica de ±6 %" },
+  { name: "Tiempo de horno", variation: "variación operativa de ±11 %" },
+  { name: "Traslado a empaquetado", variation: "variación logística de ±20 %" },
+  { name: "Equipos dañados", variation: "incrementan presión de la etapa afectada" },
+];
+
+function isNumber(value: NumberField): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function mixingRange(recipe: RecipeKey) {
+  if (recipe === "premezcla_8") return { min: 20, max: 45 };
+  if (recipe === "premezcla_6") return { min: 20, max: 40 };
+  return { min: 15, max: 35 };
+}
+
+function ovenTemperatureRange(product: ProductKey, oven: ProcessInput["horno"]) {
   if (product === "hamburguesa_brioche") return { min: 165, max: 170 };
   if (product === "pan_cuadrado") {
     if (oven === "1") return { min: 160, max: 160 };
@@ -113,30 +174,60 @@ function ovenTemperatureRange(product: ProductKey, oven: ProcessInput["amasadora
   return { min: 160, max: 160 };
 }
 
-function mixingRange(recipe: RecipeKey) {
-  if (recipe === "premezcla_8") return { min: 20, max: 45 };
-  if (recipe === "premezcla_6") return { min: 20, max: 40 };
-  return { min: 15, max: 35 };
+function ovenTimeRange(input: ProcessInput) {
+  if (input.receta === "premezcla_4") return { min: 14, max: 16 };
+  return ovenTimeRanges[input.producto];
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function pushUnique(list: string[], message: string) {
+  if (!list.includes(message)) list.push(message);
+}
+
+function equipmentPressure(input: ProcessInput, id: string) {
+  if (id === "mezclado" && input.equiposDanados.includes(`amasadora_${input.amasadora}`)) return 1.5;
+  if (id === "mezclado" && input.equiposDanados.some((item) => item.startsWith("amasadora_"))) return 1.2;
+  if (id === "porcionado" && input.equiposDanados.includes("porcionadores")) return 1.45;
+  if (id === "porcionado" && input.equiposDanados.includes("sobadoras")) return 1.18;
+  if (id === "boleado" && input.equiposDanados.includes("laminadoras")) return 1.15;
+  if (id === "horno" && input.equiposDanados.includes(`horno_${input.horno}`)) return 1.5;
+  if (id === "horno" && input.equiposDanados.some((item) => item.startsWith("horno_"))) return 1.2;
+  return 1;
+}
+
 function stage(
   id: string,
   name: string,
-  value: number,
+  value: NumberField,
   range: { min?: number; max?: number },
   unit = "min",
   note = "",
+  pressureFactor = 1,
 ): StageResult {
-  const target = range.max ?? range.min ?? value;
+  const target = range.max ?? range.min ?? (isNumber(value) ? value : 0);
+
+  if (!isNumber(value)) {
+    return {
+      id,
+      name,
+      value,
+      min: range.min,
+      max: range.max,
+      target,
+      unit,
+      pressure: 0,
+      status: "warning",
+      note: `${note} Dato pendiente.`,
+    };
+  }
+
   const upperPressure = range.max ? value / range.max : 1;
   const lowerPressure = range.min && value < range.min ? range.min / Math.max(value, 0.1) : 1;
-  const pressure = Math.max(upperPressure, lowerPressure);
+  const pressure = Math.max(upperPressure, lowerPressure) * pressureFactor;
   const outBy = Math.abs(pressure - 1);
-  const status = outBy > 0.15 ? "critical" : outBy > 0.03 ? "warning" : "ok";
 
   return {
     id,
@@ -147,8 +238,21 @@ function stage(
     target,
     unit,
     pressure,
-    status,
+    status: outBy > 0.15 ? "critical" : outBy > 0.03 ? "warning" : "ok",
     note,
+  };
+}
+
+function pendingStage(): StageResult {
+  return {
+    id: "pendiente",
+    name: "Datos pendientes",
+    value: null,
+    target: 0,
+    unit: "",
+    pressure: 0,
+    status: "warning",
+    note: "Ingrese los tiempos para detectar el cuello de botella.",
   };
 }
 
@@ -158,28 +262,46 @@ function percentile(values: number[], ratio: number) {
   return sorted[index] ?? 0;
 }
 
-function randomAround(value: number, spread: number) {
-  const a = 1 - spread;
-  const b = 1 + spread;
-  return value * (a + Math.random() * (b - a));
+function spreadForStage(id: string) {
+  if (id === "traslado") return 0.2;
+  if (id === "fermentacion") return 0.06;
+  return 0.11;
 }
 
-function runMonteCarlo(stages: StageResult[]) {
+function randomAround(value: number, spread: number) {
+  const low = 1 - spread;
+  const high = 1 + spread;
+  return value * (low + Math.random() * (high - low));
+}
+
+function measuredStages(stages: StageResult[]): Array<StageResult & { value: number }> {
+  return stages.filter((item): item is StageResult & { value: number } => isNumber(item.value));
+}
+
+function simulateStages(stages: StageResult[]) {
+  return measuredStages(stages).map((item) => {
+    const simulatedValue = randomAround(item.value, spreadForStage(item.id));
+    const simulatedPressure = Math.max(
+      item.max ? simulatedValue / item.max : 1,
+      item.min && simulatedValue < item.min ? item.min / Math.max(simulatedValue, 0.1) : 1,
+    );
+    return { ...item, simulatedValue, simulatedPressure };
+  });
+}
+
+function runMonteCarlo(stages: StageResult[]): MonteCarloResult {
   const iterations = 1200;
   const totals: number[] = [];
   const delayed: boolean[] = [];
   const frequency = new Map<string, number>();
 
   for (let index = 0; index < iterations; index += 1) {
-    const simulated = stages.map((item) => {
-      const spread = item.id === "traslado" ? 0.2 : item.id === "fermentacion" ? 0.06 : 0.11;
-      const value = randomAround(item.value, spread);
-      const pressure = Math.max(
-        item.max ? value / item.max : 1,
-        item.min && value < item.min ? item.min / Math.max(value, 0.1) : 1,
-      );
-      return { ...item, simulatedValue: value, simulatedPressure: pressure };
-    });
+    const simulated = simulateStages(stages);
+    if (simulated.length === 0) {
+      totals.push(0);
+      delayed.push(false);
+      continue;
+    }
 
     const bottleneck = simulated.reduce((winner, item) =>
       item.simulatedPressure > winner.simulatedPressure ? item : winner,
@@ -195,13 +317,66 @@ function runMonteCarlo(stages: StageResult[]) {
     p90: Math.round(percentile(totals, 0.9)),
     delayProbability: Math.round((delayed.filter(Boolean).length / iterations) * 100),
     bottleneckFrequency: [...frequency.entries()]
-      .map(([stageName, count]) => ({
-        stage: stageName,
-        probability: Math.round((count / iterations) * 100),
-      }))
+      .map(([stageName, count]) => ({ stage: stageName, probability: Math.round((count / iterations) * 100) }))
       .sort((a, b) => b.probability - a.probability)
       .slice(0, 5),
+    variables: monteCarloVariables,
   };
+}
+
+function missingAlerts(input: ProcessInput, alerts: string[]) {
+  const labels: Array<[keyof ProcessInput, string]> = [
+    ["temperaturaArea", "temperatura del área"],
+    ["humedadRelativa", "humedad relativa"],
+    ["pesoPremezcla", "peso de pre-mezcla"],
+    ["operariosBoleado", "cantidad de operarios boleando"],
+    ["temperaturaMasa", "temperatura de masa"],
+    ["tiempoMezclado", "tiempo de mezclado"],
+    ["tiempoPicado", "tiempo de picado"],
+    ["tiempoPorcionado", "tiempo de porcionado"],
+    ["tiempoBoleado", "tiempo de boleado"],
+    ["tiempoFermentacion", "tiempo de fermentación"],
+    ["tiempoHorno", "tiempo de horno"],
+    ["temperaturaHorno", "temperatura de horno"],
+    ["tiempoTraslado", "tiempo de traslado"],
+  ];
+
+  labels.forEach(([key, label]) => {
+    if (!isNumber(input[key] as NumberField)) pushUnique(alerts, `Falta ingresar ${label}.`);
+  });
+}
+
+function addEquipmentAlerts(input: ProcessInput, alerts: string[], suggestions: string[]) {
+  const damaged = input.equiposDanados;
+  if (damaged.length === 0) return;
+
+  pushUnique(alerts, `Equipos no disponibles: ${damaged.map((item) => equipmentOptions[item]).join(", ")}.`);
+
+  if (damaged.includes(`amasadora_${input.amasadora}`)) {
+    pushUnique(alerts, `La amasadora ${input.amasadora} seleccionada no está funcionando.`);
+    pushUnique(suggestions, "Cambie el lote a una amasadora disponible antes de ajustar el tiempo de mezclado.");
+  } else if (damaged.some((item) => item.startsWith("amasadora_"))) {
+    pushUnique(suggestions, "Hay menos capacidad de amasado disponible; escalone los inicios de lote para evitar espera en mezclado.");
+  }
+
+  if (damaged.includes("porcionadores")) {
+    pushUnique(alerts, "La ausencia de porcionadores puede acumular masa antes del formado.");
+    pushUnique(suggestions, "Planifique apoyo manual o reasigne personal de formado para sostener porcionado mientras el equipo se recupera.");
+  }
+  if (damaged.includes("laminadoras")) {
+    pushUnique(alerts, "La laminadora no disponible reduce la capacidad de formado cuando el producto la requiere.");
+    pushUnique(suggestions, "Antes de liberar más lotes hacia formado, confirme una ruta alternativa para laminado o cambie la secuencia de producto.");
+  }
+  if (damaged.includes("sobadoras")) {
+    pushUnique(alerts, "La sobadora no disponible puede retrasar la transición entre porcionado y formado.");
+    pushUnique(suggestions, "Reordene los lotes que dependan de sobado y use el personal compartido en el punto de espera.");
+  }
+  if (damaged.includes(`horno_${input.horno}`)) {
+    pushUnique(alerts, `El horno ${input.horno} seleccionado no está funcionando.`);
+    pushUnique(suggestions, "Cambie el lote a un horno disponible y revise la temperatura objetivo antes de cocción.");
+  } else if (damaged.some((item) => item.startsWith("horno_"))) {
+    pushUnique(suggestions, "Con menos hornos disponibles, proteja la cola de fermentación y programe la entrada a cocción por prioridad de lote.");
+  }
 }
 
 export function analyzeProcess(input: ProcessInput): AnalysisResult {
@@ -209,79 +384,116 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
   const suggestions: string[] = [];
   const productName = products[input.producto];
   const premix = premixRanges[input.receta];
-  const ovenTemp = ovenTemperatureRange(input.producto, input.amasadora);
+  const ovenTemp = ovenTemperatureRange(input.producto, input.horno);
 
-  if (input.temperaturaArea < 22) {
-    alerts.push("La temperatura del área está por debajo de 22 °C; puede retrasar fermentación y manejo de masa.");
+  missingAlerts(input, alerts);
+  addEquipmentAlerts(input, alerts, suggestions);
+
+  if (isNumber(input.temperaturaArea) && input.temperaturaArea < 22) {
+    pushUnique(alerts, "La temperatura del área está por debajo de 22 °C; puede retrasar el manejo y la fermentación.");
+    pushUnique(suggestions, "Revise la condición térmica del área antes de alargar tiempos de proceso.");
   }
-  if (input.temperaturaArea > 35) {
-    alerts.push("La temperatura del área supera 35 °C; revise enfriamiento, hidratación y velocidad de fermentación.");
+  if (isNumber(input.temperaturaArea) && input.temperaturaArea > 35) {
+    pushUnique(alerts, "La temperatura del área supera 35 °C; puede acelerar la masa fuera del flujo previsto.");
+    pushUnique(suggestions, "Controle enfriamiento e hidratación antes de adelantar lotes hacia fermentación.");
   }
-  if (input.humedadRelativa > 65) {
-    alerts.push("Humedad inválida: supera 65 %. El lote debe revisarse antes de aceptar el resultado.");
-  } else if (input.humedadRelativa < 45 || input.humedadRelativa > 55) {
-    alerts.push("La humedad relativa está fuera del rango ideal de 45 % a 55 %.");
+  if (isNumber(input.humedadRelativa) && input.humedadRelativa > 65) {
+    pushUnique(alerts, "Humedad inválida: supera 65 %. Revise el dato y la condición ambiental del lote.");
+  } else if (isNumber(input.humedadRelativa) && (input.humedadRelativa < 45 || input.humedadRelativa > 55)) {
+    pushUnique(alerts, "La humedad relativa está fuera del rango ideal de 45 % a 55 %.");
+    pushUnique(suggestions, "Considere el efecto de la humedad antes de modificar el reposo o la secuencia de formado.");
   }
-  if (input.temperaturaMasa > 32) {
-    alerts.push("La masa sale del amasado por encima de 32 °C; hay riesgo de acelerar fermentación y perder control.");
+  if (isNumber(input.temperaturaMasa) && (input.temperaturaMasa < 28 || input.temperaturaMasa > 31)) {
+    pushUnique(alerts, "La temperatura de masa debe estar entre 28 °C y 31 °C; fuera de ese rango puede afectar la formación del pan y la calidad del producto.");
+    pushUnique(suggestions, "Ajuste agua o hielo y revise el amasado para devolver la masa al rango de formación.");
   }
-  if (input.pesoPremezcla < premix.min || input.pesoPremezcla > premix.max) {
-    alerts.push(`El peso de ${recipes[input.receta]} debe estar entre ${premix.min} g y ${premix.max} g.`);
+  if (isNumber(input.pesoPremezcla) && (input.pesoPremezcla < premix.min || input.pesoPremezcla > premix.max)) {
+    pushUnique(alerts, `El peso de ${recipes[input.receta]} debe estar entre ${premix.min} g y ${premix.max} g.`);
+    pushUnique(suggestions, "Corrija el peso de pre-mezcla antes de atribuir el desvío a la operación del personal.");
   }
 
   const stages = [
-    stage("mezclado", "Mezclado", input.tiempoMezclado, mixingRange(input.receta), "min", "Amasado y desarrollo inicial."),
+    stage(
+      "mezclado",
+      "Mezclado",
+      input.tiempoMezclado,
+      mixingRange(input.receta),
+      "min",
+      `Amasadora ${input.amasadora}; inicio ${input.horaInicioAmasado || "pendiente"}.`,
+      equipmentPressure(input, "mezclado"),
+    ),
     stage("picado", "Picado con reposo", input.tiempoPicado, { min: 8, max: 10 }, "min", "Incluye reposo de masa."),
-    stage("porcionado", "Porcionado", input.tiempoPorcionado, { max: 10 }, "min", "Punto sensible de flujo entre picado y formado."),
+    stage(
+      "porcionado",
+      "Porcionado",
+      input.tiempoPorcionado,
+      { max: 10 },
+      "min",
+      "Transición hacia formado.",
+      equipmentPressure(input, "porcionado"),
+    ),
     stage(
       "boleado",
       "Boleado",
       input.tiempoBoleado,
       { max: 15 },
       "min",
-      `${input.operariosBoleado} operarios reportados.`,
+      `${isNumber(input.operariosBoleado) ? input.operariosBoleado : "Sin dato de"} operarios reportados.`,
+      equipmentPressure(input, "boleado"),
     ),
     stage("fermentacion", "Fermentación", input.tiempoFermentacion, fermentationRanges[input.producto], "min", productName),
-    stage("horno", "Horno", input.tiempoHorno, ovenTimeRanges[input.producto], "min", "Cocción por producto."),
+    stage(
+      "horno",
+      "Horno",
+      input.tiempoHorno,
+      ovenTimeRange(input),
+      "min",
+      `Horno ${input.horno}; cocción por producto y receta.`,
+      equipmentPressure(input, "horno"),
+    ),
     stage("traslado", "Traslado a empaquetado", input.tiempoTraslado, { max: 5 }, "min", "Movimiento posterior al horno."),
   ];
 
   const temperatureStage = stage("temperatura_horno", "Temperatura de horno", input.temperaturaHorno, ovenTemp, "°C");
-  if (temperatureStage.status !== "ok") {
-    alerts.push(`La temperatura de horno para ${productName} debe estar entre ${ovenTemp.min} °C y ${ovenTemp.max} °C.`);
+  if (temperatureStage.status !== "ok" && isNumber(input.temperaturaHorno)) {
+    pushUnique(alerts, `La temperatura de horno para ${productName} debe estar entre ${ovenTemp.min} °C y ${ovenTemp.max} °C.`);
+  }
+  if (input.receta === "premezcla_4" && isNumber(input.tiempoHorno) && (input.tiempoHorno < 14 || input.tiempoHorno > 16)) {
+    pushUnique(alerts, "Para la pre-mezcla de 4, el tiempo de horno debe estar entre 14 y 16 min.");
+    pushUnique(suggestions, "Ajuste la cocción de la pre-mezcla de 4 dentro de 14 a 16 min antes de cambiar el flujo del lote.");
   }
 
-  const bottleneck = stages.reduce((winner, item) => (item.pressure > winner.pressure ? item : winner));
+  stages.forEach((item) => {
+    if (item.status === "ok" || !isNumber(item.value)) return;
+    if (item.id === "mezclado") pushUnique(suggestions, "Revise la carga y el tiempo de mezclado de la amasadora seleccionada antes de iniciar el siguiente lote.");
+    if (item.id === "picado") pushUnique(suggestions, "Mantenga picado con reposo entre 8 y 10 min para no empujar variación hacia formado.");
+    if (item.id === "porcionado") pushUnique(suggestions, "Refuerce porcionado con personal compartido si se acerca o supera 10 min.");
+    if (item.id === "boleado") pushUnique(suggestions, "Reasigne apoyo a boleado hasta recuperar un tiempo menor o igual a 15 min.");
+    if (item.id === "fermentacion") pushUnique(suggestions, "Ajuste la secuencia del lote alrededor de fermentación; mover personal no corrige por sí solo ese tiempo.");
+    if (item.id === "horno") pushUnique(suggestions, "Proteja la disponibilidad del horno seleccionado y evite que fermentación libere más producto del que puede cocerse.");
+    if (item.id === "traslado") pushUnique(suggestions, "Coordine el traslado al salir del horno para no superar 5 min hacia empaquetado.");
+  });
 
-  if (bottleneck.id === "boleado") {
-    suggestions.push("Mueva temporalmente 1 o 2 operarios desde amasado auxiliar o apoyo de hornos hacia boleado hasta volver a menos de 15 min.");
+  if (isNumber(input.operariosBoleado) && input.operariosBoleado < 8) {
+    pushUnique(alerts, "El boleado tiene menos de 8 operarios reportados.");
+    pushUnique(suggestions, "Use entre 8 y 10 operarios en boleado cuando el lote llegue a formado.");
   }
-  if (bottleneck.id === "porcionado") {
-    suggestions.push("Refuerce porcionado con el operario que alterna entre amasadoras y otras áreas para evitar acumulación antes del boleado.");
+  if (isNumber(input.operariosBoleado) && input.operariosBoleado > 10) {
+    pushUnique(alerts, "El boleado tiene más de 10 operarios reportados.");
+    pushUnique(suggestions, "Si boleado ya está dentro de tiempo, mueva el excedente hacia porcionado o traslado.");
   }
-  if (bottleneck.id === "mezclado") {
-    suggestions.push("Ajuste el tiempo de mezclado dentro del rango de la receta y revise carga de amasadora antes de iniciar el siguiente lote.");
+  if (input.agregado === "hielo" && isNumber(input.temperaturaMasa) && input.temperaturaMasa < 28) {
+    pushUnique(suggestions, "Revise la cantidad de hielo; una masa fría puede alargar formación y fermentación.");
   }
-  if (bottleneck.id === "fermentacion") {
-    suggestions.push("Secuencie el siguiente lote para que no compita por fermentadora y revise temperatura/humedad antes de cambiar personal.");
-  }
-  if (bottleneck.id === "horno") {
-    suggestions.push("Priorice disponibilidad de horneros y carritos; el cuello está en cocción, no en formado.");
-  }
-  if (bottleneck.id === "traslado") {
-    suggestions.push("Asigne un hornero a traslado inmediato al cierre de horno para mantener el movimiento a empaquetado por debajo de 5 min.");
-  }
-  if (input.operariosBoleado < 8) {
-    suggestions.push("El boleado está por debajo del personal recomendado: use entre 8 y 10 operarios cuando el lote llegue a formado.");
-  }
-  if (input.operariosBoleado > 10) {
-    suggestions.push("Hay más de 10 operarios en boleado; si el tiempo ya está controlado, reasigne excedente a porcionado o traslado.");
-  }
-  if (input.agregado === "hielo" && input.temperaturaMasa <= 28) {
-    suggestions.push("El hielo está manteniendo la masa fría; confirme que no esté alargando fermentación más de lo esperado.");
-  }
+
+  const validStages = measuredStages(stages);
+  const bottleneck =
+    validStages.length > 0
+      ? validStages.reduce((winner, item) => (item.pressure > winner.pressure ? item : winner))
+      : pendingStage();
+
   if (suggestions.length === 0) {
-    suggestions.push("El flujo luce estable. Mantenga la secuencia y vigile el traslado a empaquetado, que suele degradarse rápido por coordinación.");
+    suggestions.push("El flujo medido está dentro de los rangos evaluados. Mantenga la secuencia y vigile esperas entre fermentación, horno y traslado.");
   }
 
   return {
@@ -293,28 +505,98 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
   };
 }
 
+export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
+  const selected = inputs.slice(0, 30);
+  const analyses = selected.map((item) => analyzeProcess(item));
+  const bottleneckCounts = new Map<string, number>();
+  const alerts: string[] = [];
+
+  analyses.forEach((item) => {
+    bottleneckCounts.set(item.bottleneck.name, (bottleneckCounts.get(item.bottleneck.name) ?? 0) + 1);
+    item.alerts.forEach((alert) => pushUnique(alerts, alert));
+  });
+
+  const iterations = 1200;
+  const totals: number[] = [];
+  const delays: boolean[] = [];
+  const simulatedBottlenecks = new Map<string, number>();
+
+  for (let index = 0; index < iterations; index += 1) {
+    let total = 0;
+    let hasDelay = false;
+
+    analyses.forEach((analysis) => {
+      const simulated = simulateStages(analysis.stages);
+      if (simulated.length === 0) return;
+      const bottleneck = simulated.reduce((winner, item) =>
+        item.simulatedPressure > winner.simulatedPressure ? item : winner,
+      );
+      simulatedBottlenecks.set(bottleneck.name, (simulatedBottlenecks.get(bottleneck.name) ?? 0) + 1);
+      total += simulated.reduce((sum, item) => sum + item.simulatedValue, 0);
+      if (simulated.some((item) => item.max !== undefined && item.simulatedValue > item.max)) hasDelay = true;
+    });
+
+    totals.push(total);
+    delays.push(hasDelay);
+  }
+
+  return {
+    lotCount: selected.length,
+    alerts,
+    topBottlenecks: [...bottleneckCounts.entries()]
+      .map(([stageName, lots]) => ({ stage: stageName, lots }))
+      .sort((a, b) => b.lots - a.lots),
+    monteCarlo: {
+      iterations,
+      p50: Math.round(percentile(totals, 0.5)),
+      p90: Math.round(percentile(totals, 0.9)),
+      delayProbability: Math.round((delays.filter(Boolean).length / iterations) * 100),
+      bottleneckFrequency: [...simulatedBottlenecks.entries()]
+        .map(([stageName, count]) => ({
+          stage: stageName,
+          probability: Math.round((count / Math.max(selected.length * iterations, 1)) * 100),
+        }))
+        .sort((a, b) => b.probability - a.probability)
+        .slice(0, 5),
+      variables: monteCarloVariables,
+    },
+  };
+}
+
 export function defaultInput(): ProcessInput {
   return {
     fecha: new Date().toISOString().slice(0, 10),
     lote: "L-001",
     producto: "hamburguesa_tradicional",
     amasadora: "1",
-    temperaturaArea: 26,
-    humedadRelativa: 50,
+    horno: "1",
+    temperaturaArea: null,
+    humedadRelativa: null,
     horaInicioAmasado: "07:00",
     receta: "premezcla_6",
-    pesoPremezcla: 1142,
-    tiempoMezclado: 25,
+    pesoPremezcla: null,
+    tiempoMezclado: null,
     agregado: "agua",
-    temperaturaMasa: 30,
-    tiempoPicado: 9,
-    tiempoPorcionado: 9,
-    tiempoBoleado: 14,
-    tiempoFermentacion: 150,
-    tiempoHorno: 15,
-    temperaturaHorno: 160,
-    tiempoTraslado: 4,
-    operariosBoleado: 8,
+    temperaturaMasa: null,
+    tiempoPicado: null,
+    tiempoPorcionado: null,
+    tiempoBoleado: null,
+    tiempoFermentacion: null,
+    tiempoHorno: null,
+    temperaturaHorno: null,
+    tiempoTraslado: null,
+    operariosBoleado: null,
+    equiposDanados: [],
+  };
+}
+
+export function normalizeInput(input: Partial<ProcessInput>): ProcessInput {
+  const fallback = defaultInput();
+  return {
+    ...fallback,
+    ...input,
+    horno: input.horno ?? fallback.horno,
+    equiposDanados: input.equiposDanados ?? [],
   };
 }
 

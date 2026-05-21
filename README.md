@@ -1,6 +1,14 @@
 # Proyecto Daniela
 
-Aplicación web para analizar lotes de producción de panadería, detectar cuellos de botella, sugerir cambios operativos y ejecutar una simulación Monte Carlo sencilla.
+Aplicación web para analizar lotes de producción de panadería, detectar cuellos de botella, sugerir cambios operativos y ejecutar simulaciones Monte Carlo individuales o grupales.
+
+## Funciones
+
+- Registro de lotes con amasadora y horno separados.
+- Alertas por rangos de proceso y por equipos no disponibles.
+- Análisis individual y análisis grupal de hasta 30 lotes guardados.
+- Variables de Monte Carlo visibles en la pantalla.
+- Exportación del registro a una base Excel `.xls`.
 
 ## Desarrollo
 
