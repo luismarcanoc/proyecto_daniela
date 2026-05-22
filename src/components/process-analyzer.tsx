@@ -235,6 +235,21 @@ export function ProcessAnalyzer() {
     });
   }
 
+  function clearGroup() {
+    setSelectedIds([]);
+  }
+
+  function deleteSelectedLots() {
+    if (selectedIds.length === 0) return;
+    const shouldDelete = window.confirm(
+      `Se eliminarán ${selectedIds.length} lote(s) del registro. Esta acción también los quita del análisis grupal.`,
+    );
+    if (!shouldDelete) return;
+
+    setHistory((current) => current.filter((item) => !selectedIds.includes(item.id)));
+    setSelectedIds([]);
+  }
+
   function saveAnalysis() {
     const item: SavedAnalysis = {
       id: crypto.randomUUID(),
@@ -478,6 +493,14 @@ export function ProcessAnalyzer() {
           <div className="section-title compact">
             <h2>Registro y selección</h2>
             <p>{selectedIds.length}/30 lotes</p>
+          </div>
+          <div className="history-actions">
+            <button className="secondary-action" type="button" disabled={selectedIds.length === 0} onClick={clearGroup}>
+              Limpiar grupo
+            </button>
+            <button className="danger-action" type="button" disabled={selectedIds.length === 0} onClick={deleteSelectedLots}>
+              Eliminar seleccionados
+            </button>
           </div>
           {history.length === 0 ? (
             <p className="empty">Guarde un análisis para crear el registro y exportarlo.</p>

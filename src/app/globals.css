@@ -108,6 +108,22 @@ h2 {
   cursor: not-allowed;
 }
 
+.danger-action {
+  background: #fff3f0;
+  border: 1px solid rgba(183, 53, 53, 0.28);
+  border-radius: 8px;
+  color: var(--critical);
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.danger-action:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .workspace {
   align-items: start;
   display: grid;
@@ -380,6 +396,18 @@ button:focus-visible {
   gap: 10px;
 }
 
+.history-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 12px;
+}
+
+.history-actions .secondary-action {
+  min-height: 40px;
+  padding: 0 12px;
+}
+
 .history-item {
   align-items: stretch;
   display: grid;
@@ -483,7 +511,8 @@ button:focus-visible {
   .equipment-grid,
   .mc-grid,
   .stage-row,
-  .history-item {
+  .history-item,
+  .history-actions {
     grid-template-columns: 1fr;
   }
 
