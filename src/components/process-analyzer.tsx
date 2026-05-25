@@ -20,14 +20,25 @@ import {
 } from "@/lib/process-analysis";
 
 type WasteReasonKey =
-  | "fermentacion"
-  | "temperatura_masa"
-  | "formado"
-  | "coccion"
-  | "peso"
-  | "equipo"
-  | "traslado"
-  | "otro";
+  | "adherido_bandeja"
+  | "adherido_silpad"
+  | "burbuja_mancha_corona"
+  | "alveolado_cavidad"
+  | "crudo"
+  | "quemado"
+  | "color"
+  | "fermentado"
+  | "pan_pequeno"
+  | "pan_grande"
+  | "mal_formado"
+  | "deformado_horno"
+  | "mal_corte"
+  | "manchado"
+  | "aplastado_maltratado_roto"
+  | "sobrante_buen_estado"
+  | "caido_piso"
+  | "materia_extrana"
+  | "defecto_mezcla";
 
 type SavedAnalysis = {
   id: string;
@@ -39,15 +50,83 @@ type SavedAnalysis = {
 };
 
 const storageKey = "proyecto-daniela-analisis";
-const wasteReasons: Record<WasteReasonKey, string> = {
-  fermentacion: "Fermentación retrasada o fuera de condición",
-  temperatura_masa: "Temperatura de masa",
-  formado: "Picado, porcionado o formado",
-  coccion: "Cocción u horno",
-  peso: "Peso o receta",
-  equipo: "Equipo no disponible",
-  traslado: "Traslado o empaquetado",
-  otro: "Otro motivo",
+const wasteReasons: Record<WasteReasonKey, { label: string; description: string }> = {
+  adherido_bandeja: {
+    label: "Adherido a Bandeja/Molde/Aro",
+    description: "Engrasado insuficiente o mal ejecutado en bandeja, aro o molde.",
+  },
+  adherido_silpad: {
+    label: "Adherido al Silpad",
+    description: "Secado inadecuado del Silpad de horneado.",
+  },
+  burbuja_mancha_corona: {
+    label: "Burbuja/Mancha en la Corona",
+    description: "Fermentación excesiva o exceso de humedad en fermentadora.",
+  },
+  alveolado_cavidad: {
+    label: "Alveolado/Cavidad",
+    description: "Formado o fermentación inadecuada.",
+  },
+  crudo: {
+    label: "Crudo",
+    description: "Cocción insuficiente; temperatura interna menor a 92 °C.",
+  },
+  quemado: {
+    label: "Quemado",
+    description: "Horneado excesivo con olor o sabor a quemado.",
+  },
+  color: {
+    label: "Color",
+    description: "Color por debajo o por encima del estándar aunque la cocción sea suficiente.",
+  },
+  fermentado: {
+    label: "Fermentado",
+    description: "Exceso de fermentación, acidez o poco volumen tras hornear.",
+  },
+  pan_pequeno: {
+    label: "Pan pequeño",
+    description: "No alcanza tamaño mínimo por fermentación o ingredientes/fórmula.",
+  },
+  pan_grande: {
+    label: "Pan Grande",
+    description: "Tamaño por encima del estándar por levado excesivo.",
+  },
+  mal_formado: {
+    label: "Mal Formado",
+    description: "Boleado, formado o colocación en bandeja inadecuado.",
+  },
+  deformado_horno: {
+    label: "Deformado (Horno)",
+    description: "Deformación durante traslado o introducción al horno.",
+  },
+  mal_corte: {
+    label: "Mal corte",
+    description: "Daño durante el corte o rebanado.",
+  },
+  manchado: {
+    label: "Manchado",
+    description: "Grasa, carbón u otra sustancia durante fermentación, horneado o traslado.",
+  },
+  aplastado_maltratado_roto: {
+    label: "Aplastado/Maltratado/Roto",
+    description: "Daño por manipulación durante desmoldeado o empacado.",
+  },
+  sobrante_buen_estado: {
+    label: "Sobrante en buen estado",
+    description: "No completa un paquete aunque está en buen estado.",
+  },
+  caido_piso: {
+    label: "Caído al piso",
+    description: "Producto caído al piso.",
+  },
+  materia_extrana: {
+    label: "Materia Extraña",
+    description: "Metal, plástico u otra materia contaminante.",
+  },
+  defecto_mezcla: {
+    label: "Defecto de Mezcla",
+    description: "Sabor, textura o apariencia no conforme por mezclado o fórmula.",
+  },
 };
 const pieColors = ["#1c7c65", "#bd7b18", "#b73535", "#3179a8", "#70529b", "#489870", "#c05d43", "#67736e"];
 const numberFields = [
@@ -96,7 +175,6 @@ function exportExcel(history: SavedAnalysis[]) {
     "Tiempo horno",
     "Temperatura horno",
     "Tiempo traslado",
-    "Carritos",
     "Equipos dañados",
     "Cuello individual",
     "Tiempo total",
@@ -131,7 +209,6 @@ function exportExcel(history: SavedAnalysis[]) {
     item.input.tiempoHorno,
     item.input.temperaturaHorno,
     item.input.tiempoTraslado,
-    item.input.carritos,
     item.input.equiposDanados.map((key) => equipmentOptions[key]).join(", "),
     item.result.bottleneck.name,
     item.result.totalTime,
@@ -141,7 +218,7 @@ function exportExcel(history: SavedAnalysis[]) {
     item.result.alerts.join(" | "),
     item.result.suggestions.join(" | "),
     item.wasteReported ? "Sí" : "No",
-    item.wasteReasons.map((key) => wasteReasons[key]).join(", "),
+    item.wasteReasons.map((key) => wasteReasons[key].label).join(", "),
   ]);
 
   const sheetRows = [columns, ...rows]
@@ -223,9 +300,13 @@ function wasteBreakdown(items: SavedAnalysis[]) {
     .forEach((item) => item.wasteReasons.forEach((reason) => count.set(reason, (count.get(reason) ?? 0) + 1)));
 
   return [...count.entries()].map(([reason, value]) => ({
-    label: wasteReasons[reason],
+    label: wasteReasons[reason].label,
     value,
   }));
+}
+
+function isWasteReasonKey(value: unknown): value is WasteReasonKey {
+  return typeof value === "string" && value in wasteReasons;
 }
 
 function PieChart({
@@ -312,7 +393,7 @@ export function ProcessAnalyzer() {
           result: analyzeProcess(normalized),
           createdAt: item.createdAt ?? new Date().toISOString(),
           wasteReported: item.wasteReported ?? false,
-          wasteReasons: item.wasteReasons ?? [],
+          wasteReasons: Array.isArray(item.wasteReasons) ? item.wasteReasons.filter(isWasteReasonKey) : [],
         };
       }),
     );
@@ -500,9 +581,6 @@ export function ProcessAnalyzer() {
             <Field label="Temperatura horno (°C)">
               <NumberInput value={input.temperaturaHorno} onChange={(value) => update("temperaturaHorno", value)} />
             </Field>
-            <Field label="Carritos del lote">
-              <NumberInput value={input.carritos} onChange={(value) => update("carritos", value)} />
-            </Field>
           </div>
 
           <div className="section-title compact">
@@ -679,7 +757,7 @@ export function ProcessAnalyzer() {
       <section className="panel group-panel">
         <div className="section-title">
           <h2>Análisis grupal de lotes</h2>
-          <p>Seleccione desde el registro hasta 30 lotes.</p>
+          <p>Cada lote corresponde a un carrito; al salir, libera su posición para el siguiente lote.</p>
         </div>
         {!groupResult ? (
           <p className="empty">El análisis grupal aparecerá cuando seleccione al menos un lote guardado.</p>
@@ -743,7 +821,7 @@ export function ProcessAnalyzer() {
               <p className="eyebrow">Tiempo completo por lote</p>
               {groupResult.lotTotals.map((item) => (
                 <div key={item.lote}>
-                  <span>{item.lote} · {item.carritos} carrito(s)</span>
+                  <span>{item.lote} · 1 carrito</span>
                   <strong>{item.totalTime === null ? "Pendiente" : `${item.totalTime} min`}</strong>
                 </div>
               ))}
@@ -789,7 +867,7 @@ export function ProcessAnalyzer() {
                 <span>Este lote tuvo merma</span>
               </label>
               <div className="waste-reasons">
-                {Object.entries(wasteReasons).map(([key, label]) => (
+                {Object.entries(wasteReasons).map(([key, reason]) => (
                   <label className="check-option" key={key}>
                     <input
                       type="checkbox"
@@ -797,7 +875,10 @@ export function ProcessAnalyzer() {
                       checked={wasteLot?.wasteReasons.includes(key as WasteReasonKey) ?? false}
                       onChange={() => toggleWasteReason(key as WasteReasonKey)}
                     />
-                    <span>{label}</span>
+                    <span className="defect-copy">
+                      <strong>{reason.label}</strong>
+                      <small>{reason.description}</small>
+                    </span>
                   </label>
                 ))}
               </div>

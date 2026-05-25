@@ -563,7 +563,25 @@ button:focus-visible {
 }
 
 .waste-reasons .check-option {
+  align-items: start;
   min-height: 42px;
+}
+
+.defect-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.defect-copy strong {
+  color: var(--foreground);
+  font-size: 0.83rem;
+}
+
+.defect-copy small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 400;
+  line-height: 1.35;
 }
 
 .waste-charts {

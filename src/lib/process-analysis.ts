@@ -44,7 +44,6 @@ export type ProcessInput = {
   temperaturaHorno: NumberField;
   tiempoTraslado: NumberField;
   operariosBoleado: NumberField;
-  carritos: NumberField;
   equiposDanados: EquipmentKey[];
 };
 
@@ -90,7 +89,7 @@ export type GroupAnalysisResult = {
   topBottlenecks: Array<{ stage: string; lots: number }>;
   maxConcurrentCarts: number;
   lotsOutsideIdealZone: number;
-  lotTotals: Array<{ lote: string; totalTime: number | null; carritos: number }>;
+  lotTotals: Array<{ lote: string; totalTime: number | null }>;
   monteCarlo: MonteCarloResult;
 };
 
@@ -156,7 +155,8 @@ const monteCarloVariables: MonteCarloVariable[] = [
   { name: "Tiempo de fermentación", variation: "variación térmica de ±6 %" },
   { name: "Tiempo de horno", variation: "variación operativa de ±11 %" },
   { name: "Traslado a empaquetado", variation: "variación logística de ±20 %" },
-  { name: "Carritos en fermentadora", variation: "capacidad compartida: 18 puestos, solo 3 en zona ideal" },
+  { name: "Lotes en fermentadora", variation: "cada lote representa 1 carrito; capacidad compartida de 18 puestos, solo 3 en zona ideal" },
+  { name: "Liberación de posiciones", variation: "al salir un lote, el siguiente ocupa primero una posición ideal disponible" },
   { name: "Zona no ideal de fermentación", variation: "demora adicional simulada de 10 % a 25 %" },
   { name: "Equipos dañados", variation: "incrementan presión de la etapa afectada" },
 ];
@@ -357,7 +357,6 @@ function missingAlerts(input: ProcessInput, alerts: string[]) {
     ["tiempoHorno", "tiempo de horno"],
     ["temperaturaHorno", "temperatura de horno"],
     ["tiempoTraslado", "tiempo de traslado"],
-    ["carritos", "cantidad de carritos del lote"],
   ];
 
   labels.forEach(([key, label]) => {
@@ -429,16 +428,6 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
   if (isNumber(input.pesoPremezcla) && (input.pesoPremezcla < premix.min || input.pesoPremezcla > premix.max)) {
     pushUnique(alerts, `El peso de ${recipes[input.receta]} debe estar entre ${premix.min} g y ${premix.max} g.`);
     pushUnique(suggestions, "Corrija el peso de pre-mezcla antes de atribuir el desvío a la operación del personal.");
-  }
-  if (isNumber(input.carritos) && input.carritos > 18) {
-    pushUnique(alerts, "Un lote no puede ocupar más de 18 carritos simultáneamente en la fermentadora.");
-    pushUnique(suggestions, "Divida la entrada del lote a fermentación o reprográmela para respetar la capacidad de 18 carritos.");
-  }
-  if (input.carritos === 0) {
-    pushUnique(alerts, "Indique al menos 1 carrito para evaluar la ocupación real de la fermentadora.");
-  }
-  if (isNumber(input.carritos) && input.carritos > 3) {
-    pushUnique(alerts, "Solo 3 carritos pueden permanecer simultáneamente en la zona ideal de fermentación; parte del lote puede tardar más.");
   }
 
   const stages = [
@@ -546,11 +535,6 @@ function startMinute(time: string) {
   return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : 0;
 }
 
-function cartCount(input: ProcessInput) {
-  if (!isNumber(input.carritos) || input.carritos < 1) return 1;
-  return Math.min(18, Math.ceil(input.carritos));
-}
-
 function stageValue(stages: StageResult[], id: string) {
   const value = stages.find((item) => item.id === id)?.value;
   return isNumber(value) ? value : null;
@@ -586,24 +570,21 @@ function fermentationSchedule(
     .sort((a, b) => startMinute(a.input.horaInicioAmasado) - startMinute(b.input.horaInicioAmasado))
     .forEach(({ input, parts }) => {
       const arrival = startMinute(input.horaInicioAmasado) + parts.before;
-      const carts = cartCount(input);
       let usedNonIdeal = false;
       let lotLeavesFermenter = arrival;
 
-      for (let cart = 0; cart < carts; cart += 1) {
-        const availableSlot = slotAvailability.findIndex((availableAt) => availableAt <= arrival);
-        const firstFree = Math.min(...slotAvailability);
-        const slot = availableSlot >= 0 ? availableSlot : slotAvailability.indexOf(firstFree);
-        const enters = Math.max(arrival, firstFree);
-        const outsideIdeal = slot >= 3;
-        const delayFactor = outsideIdeal ? (randomize ? 1.1 + Math.random() * 0.15 : 1.175) : 1;
-        const leaves = enters + parts.fermentation * delayFactor;
-        if (enters > arrival) waitingOccurred = true;
-        if (outsideIdeal) usedNonIdeal = true;
-        intervals.push({ start: enters, end: leaves });
-        slotAvailability[slot] = leaves;
-        lotLeavesFermenter = Math.max(lotLeavesFermenter, leaves);
-      }
+      const availableSlot = slotAvailability.findIndex((availableAt) => availableAt <= arrival);
+      const firstFree = Math.min(...slotAvailability);
+      const slot = availableSlot >= 0 ? availableSlot : slotAvailability.indexOf(firstFree);
+      const enters = Math.max(arrival, firstFree);
+      const outsideIdeal = slot >= 3;
+      const delayFactor = outsideIdeal ? (randomize ? 1.1 + Math.random() * 0.15 : 1.175) : 1;
+      const leaves = enters + parts.fermentation * delayFactor;
+      if (enters > arrival) waitingOccurred = true;
+      if (outsideIdeal) usedNonIdeal = true;
+      intervals.push({ start: enters, end: leaves });
+      slotAvailability[slot] = leaves;
+      lotLeavesFermenter = leaves;
 
       if (usedNonIdeal) lotsOutsideIdealZone += 1;
       latestCompletion = Math.max(latestCompletion, lotLeavesFermenter + parts.after);
@@ -702,7 +683,6 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
     lotTotals: selected.map((input, index) => ({
       lote: input.lote,
       totalTime: analyses[index].totalTime,
-      carritos: cartCount(input),
     })),
     topBottlenecks: [...bottleneckCounts.entries()]
       .map(([stageName, lots]) => ({ stage: stageName, lots }))
@@ -747,7 +727,6 @@ export function defaultInput(): ProcessInput {
     temperaturaHorno: null,
     tiempoTraslado: null,
     operariosBoleado: null,
-    carritos: null,
     equiposDanados: [],
   };
 }
