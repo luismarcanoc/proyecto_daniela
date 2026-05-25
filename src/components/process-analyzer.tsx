@@ -16,16 +16,40 @@ import {
   type ProcessInput,
   type ProductKey,
   type RecipeKey,
+  type StageResult,
 } from "@/lib/process-analysis";
+
+type WasteReasonKey =
+  | "fermentacion"
+  | "temperatura_masa"
+  | "formado"
+  | "coccion"
+  | "peso"
+  | "equipo"
+  | "traslado"
+  | "otro";
 
 type SavedAnalysis = {
   id: string;
   input: ProcessInput;
   result: AnalysisResult;
   createdAt: string;
+  wasteReported: boolean;
+  wasteReasons: WasteReasonKey[];
 };
 
 const storageKey = "proyecto-daniela-analisis";
+const wasteReasons: Record<WasteReasonKey, string> = {
+  fermentacion: "Fermentación retrasada o fuera de condición",
+  temperatura_masa: "Temperatura de masa",
+  formado: "Picado, porcionado o formado",
+  coccion: "Cocción u horno",
+  peso: "Peso o receta",
+  equipo: "Equipo no disponible",
+  traslado: "Traslado o empaquetado",
+  otro: "Otro motivo",
+};
+const pieColors = ["#1c7c65", "#bd7b18", "#b73535", "#3179a8", "#70529b", "#489870", "#c05d43", "#67736e"];
 const numberFields = [
   ["tiempoMezclado", "Mezclado"],
   ["tiempoPicado", "Picado"],
@@ -39,7 +63,7 @@ const numberFields = [
 function numberValue(value: string): NumberField {
   if (value.trim() === "") return null;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function excelText(value: string | number | null | undefined) {
@@ -72,13 +96,17 @@ function exportExcel(history: SavedAnalysis[]) {
     "Tiempo horno",
     "Temperatura horno",
     "Tiempo traslado",
+    "Carritos",
     "Equipos dañados",
     "Cuello individual",
+    "Tiempo total",
     "P50 Monte Carlo",
     "P90 Monte Carlo",
     "Riesgo atraso",
     "Alertas",
     "Sugerencias",
+    "Tuvo merma",
+    "Motivos de merma",
   ];
 
   const rows = history.map((item) => [
@@ -103,13 +131,17 @@ function exportExcel(history: SavedAnalysis[]) {
     item.input.tiempoHorno,
     item.input.temperaturaHorno,
     item.input.tiempoTraslado,
+    item.input.carritos,
     item.input.equiposDanados.map((key) => equipmentOptions[key]).join(", "),
     item.result.bottleneck.name,
+    item.result.totalTime,
     item.result.monteCarlo.p50,
     item.result.monteCarlo.p90,
     `${item.result.monteCarlo.delayProbability}%`,
     item.result.alerts.join(" | "),
     item.result.suggestions.join(" | "),
+    item.wasteReported ? "Sí" : "No",
+    item.wasteReasons.map((key) => wasteReasons[key]).join(", "),
   ]);
 
   const sheetRows = [columns, ...rows]
@@ -155,7 +187,7 @@ function Field({
 function NumberInput({
   value,
   onChange,
-  min,
+  min = 0,
   max,
 }: {
   value: NumberField;
@@ -178,10 +210,80 @@ function StatusDot({ status }: { status: "ok" | "warning" | "critical" }) {
   return <span className={`status-dot ${status}`} aria-hidden="true" />;
 }
 
+function stageRangeLabel(item: StageResult) {
+  if (item.min === undefined && item.max === undefined) return "";
+  if (item.min !== undefined && item.min === item.max) return ` · valor exacto ${item.min} ${item.unit}`;
+  return ` · rango ${item.min ?? "0"}-${item.max ?? "sin límite"} ${item.unit}`;
+}
+
+function wasteBreakdown(items: SavedAnalysis[]) {
+  const count = new Map<WasteReasonKey, number>();
+  items
+    .filter((item) => item.wasteReported)
+    .forEach((item) => item.wasteReasons.forEach((reason) => count.set(reason, (count.get(reason) ?? 0) + 1)));
+
+  return [...count.entries()].map(([reason, value]) => ({
+    label: wasteReasons[reason],
+    value,
+  }));
+}
+
+function PieChart({
+  title,
+  subtitle,
+  data,
+}: {
+  title: string;
+  subtitle: string;
+  data: Array<{ label: string; value: number }>;
+}) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  let angle = 0;
+  const gradient =
+    total === 0
+      ? "#ebe2d6"
+      : `conic-gradient(${data
+          .map((item, index) => {
+            const start = angle;
+            angle += (item.value / total) * 360;
+            return `${pieColors[index % pieColors.length]} ${start}deg ${angle}deg`;
+          })
+          .join(", ")})`;
+
+  return (
+    <article className="waste-chart">
+      <div className="section-title compact">
+        <h2>{title}</h2>
+        <p>{subtitle}</p>
+      </div>
+      <div className="pie-layout">
+        <div className="pie-chart" style={{ background: gradient }} role="img" aria-label={`${title}: ${total} causas registradas`}>
+          <strong>{total}</strong>
+          <span>causas</span>
+        </div>
+        {total === 0 ? (
+          <p className="empty">No hay motivos de merma registrados para esta selección.</p>
+        ) : (
+          <div className="pie-legend">
+            {data.map((item, index) => (
+              <div key={item.label}>
+                <span style={{ background: pieColors[index % pieColors.length] }} />
+                <p>{item.label}</p>
+                <strong>{Math.round((item.value / total) * 100)}%</strong>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
 export function ProcessAnalyzer() {
   const [input, setInput] = useState<ProcessInput>(() => defaultInput());
   const [history, setHistory] = useState<SavedAnalysis[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [wasteLotId, setWasteLotId] = useState("");
   const result = useMemo(() => analyzeProcess(input), [input]);
   const selectedAnalyses = useMemo(
     () => history.filter((item) => selectedIds.includes(item.id)).slice(0, 30),
@@ -191,6 +293,10 @@ export function ProcessAnalyzer() {
     () => (selectedAnalyses.length > 0 ? analyzeGroup(selectedAnalyses.map((item) => item.input)) : null),
     [selectedAnalyses],
   );
+  const wasteLot = history.find((item) => item.id === wasteLotId) ?? null;
+  const individualWasteData = wasteLot ? wasteBreakdown([wasteLot]) : [];
+  const groupWasteData = wasteBreakdown(selectedAnalyses);
+  const groupWasteCount = selectedAnalyses.filter((item) => item.wasteReported).length;
 
   useEffect(() => {
     const raw = window.localStorage.getItem(storageKey);
@@ -205,10 +311,19 @@ export function ProcessAnalyzer() {
           input: normalized,
           result: analyzeProcess(normalized),
           createdAt: item.createdAt ?? new Date().toISOString(),
+          wasteReported: item.wasteReported ?? false,
+          wasteReasons: item.wasteReasons ?? [],
         };
       }),
     );
   }, []);
+
+  useEffect(() => {
+    if (history.length > 0 && !history.some((item) => item.id === wasteLotId)) {
+      setWasteLotId(history[0].id);
+    }
+    if (history.length === 0) setWasteLotId("");
+  }, [history, wasteLotId]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(history));
@@ -256,12 +371,43 @@ export function ProcessAnalyzer() {
       input,
       result,
       createdAt: new Date().toISOString(),
+      wasteReported: false,
+      wasteReasons: [],
     };
     setHistory((current) => [item, ...current].slice(0, 100));
+    setWasteLotId(item.id);
   }
 
   function loadAnalysis(item: SavedAnalysis) {
     setInput(item.input);
+  }
+
+  function updateWaste(reported: boolean) {
+    if (!wasteLot) return;
+    setHistory((current) =>
+      current.map((item) =>
+        item.id === wasteLot.id
+          ? {
+              ...item,
+              wasteReported: reported,
+              wasteReasons: reported ? item.wasteReasons : [],
+            }
+          : item,
+      ),
+    );
+  }
+
+  function toggleWasteReason(reason: WasteReasonKey) {
+    if (!wasteLot) return;
+    setHistory((current) =>
+      current.map((item) => {
+        if (item.id !== wasteLot.id) return item;
+        const selected = item.wasteReasons.includes(reason)
+          ? item.wasteReasons.filter((itemReason) => itemReason !== reason)
+          : [...item.wasteReasons, reason];
+        return { ...item, wasteReported: selected.length > 0 || item.wasteReported, wasteReasons: selected };
+      }),
+    );
   }
 
   return (
@@ -354,6 +500,9 @@ export function ProcessAnalyzer() {
             <Field label="Temperatura horno (°C)">
               <NumberInput value={input.temperaturaHorno} onChange={(value) => update("temperaturaHorno", value)} />
             </Field>
+            <Field label="Carritos del lote">
+              <NumberInput value={input.carritos} onChange={(value) => update("carritos", value)} />
+            </Field>
           </div>
 
           <div className="section-title compact">
@@ -394,6 +543,10 @@ export function ProcessAnalyzer() {
                 {result.bottleneck.value ?? "Pendiente"} {result.bottleneck.unit}
               </span>
               <strong>{scoreStage(result.bottleneck)}%</strong>
+            </div>
+            <div className="total-time">
+              <span>Tiempo total del lote</span>
+              <strong>{result.totalTime === null ? "Pendiente" : `${result.totalTime} min`}</strong>
             </div>
             <p>{result.bottleneck.note}</p>
           </section>
@@ -441,9 +594,7 @@ export function ProcessAnalyzer() {
                   </div>
                   <span>
                     {item.value ?? "Pendiente"} {item.unit}
-                    {item.min !== undefined || item.max !== undefined
-                      ? ` · rango ${item.min ?? "0"}-${item.max ?? "sin límite"} ${item.unit}`
-                      : ""}
+                    {stageRangeLabel(item)}
                   </span>
                 </div>
                 <div className="bar" aria-label={`Presión ${scoreStage(item)}%`}>
@@ -537,6 +688,16 @@ export function ProcessAnalyzer() {
             <div>
               <p className="eyebrow">Conjunto evaluado</p>
               <strong className="group-count">{groupResult.lotCount} lotes</strong>
+              <div className="capacity-stats">
+                <div>
+                  <span>Ocupación máxima</span>
+                  <strong>{groupResult.maxConcurrentCarts}/18</strong>
+                </div>
+                <div>
+                  <span>Lotes fuera de zona ideal</span>
+                  <strong>{groupResult.lotsOutsideIdealZone}</strong>
+                </div>
+              </div>
               <div className="frequency-list">
                 {groupResult.topBottlenecks.map((item) => (
                   <div key={item.stage}>
@@ -570,6 +731,22 @@ export function ProcessAnalyzer() {
                   </div>
                 ))}
               </div>
+              <div className="variable-list">
+                {groupResult.monteCarlo.variables.map((item) => (
+                  <p key={item.name}>
+                    <strong>{item.name}:</strong> {item.variation}
+                  </p>
+                ))}
+              </div>
+            </div>
+            <div className="group-lots">
+              <p className="eyebrow">Tiempo completo por lote</p>
+              {groupResult.lotTotals.map((item) => (
+                <div key={item.lote}>
+                  <span>{item.lote} · {item.carritos} carrito(s)</span>
+                  <strong>{item.totalTime === null ? "Pendiente" : `${item.totalTime} min`}</strong>
+                </div>
+              ))}
             </div>
             {groupResult.alerts.length > 0 ? (
               <div className="group-alerts">
@@ -582,6 +759,62 @@ export function ProcessAnalyzer() {
               </div>
             ) : null}
           </div>
+        )}
+      </section>
+
+      <section className="panel waste-panel">
+        <div className="section-title">
+          <div>
+            <p className="eyebrow">Control de calidad</p>
+            <h2>Registro de merma</h2>
+          </div>
+          <p>Clasifique los lotes problemáticos y sus motivos.</p>
+        </div>
+        {history.length === 0 ? (
+          <p className="empty">Guarde al menos un lote para registrar merma.</p>
+        ) : (
+          <>
+            <div className="waste-form">
+              <Field label="Lote a clasificar">
+                <select value={wasteLotId} onChange={(event) => setWasteLotId(event.target.value)}>
+                  {history.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.input.lote} · {products[item.input.producto]}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <label className="check-option waste-toggle">
+                <input type="checkbox" checked={wasteLot?.wasteReported ?? false} onChange={(event) => updateWaste(event.target.checked)} />
+                <span>Este lote tuvo merma</span>
+              </label>
+              <div className="waste-reasons">
+                {Object.entries(wasteReasons).map(([key, label]) => (
+                  <label className="check-option" key={key}>
+                    <input
+                      type="checkbox"
+                      disabled={!wasteLot?.wasteReported}
+                      checked={wasteLot?.wasteReasons.includes(key as WasteReasonKey) ?? false}
+                      onChange={() => toggleWasteReason(key as WasteReasonKey)}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="waste-charts">
+              <PieChart
+                title="Merma individual"
+                subtitle={wasteLot ? wasteLot.input.lote : "Sin lote"}
+                data={individualWasteData}
+              />
+              <PieChart
+                title="Merma del conjunto"
+                subtitle={`${groupWasteCount}/${selectedAnalyses.length} lotes seleccionados con merma`}
+                data={groupWasteData}
+              />
+            </div>
+          </>
         )}
       </section>
     </main>

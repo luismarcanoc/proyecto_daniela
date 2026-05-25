@@ -7,7 +7,9 @@ Aplicación web para analizar lotes de producción de panadería, detectar cuell
 - Registro de lotes con amasadora y horno separados.
 - Alertas por rangos de proceso y por equipos no disponibles.
 - Análisis individual y análisis grupal de hasta 30 lotes guardados.
-- Variables de Monte Carlo visibles en la pantalla.
+- Modelo de fermentadora compartida: 18 carritos totales y 3 posiciones de condiciones ideales.
+- Tiempo total de proceso por lote y variables de Monte Carlo visibles en la pantalla.
+- Registro de merma con motivos y gráficos individual/conjunto.
 - Exportación del registro a una base Excel `.xls`.
 
 ## Desarrollo

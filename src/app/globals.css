@@ -262,6 +262,26 @@ button:focus-visible {
   font-size: 1.8rem;
 }
 
+.total-time {
+  align-items: center;
+  border-bottom: 1px solid rgba(189, 229, 215, 0.28);
+  border-top: 1px solid rgba(189, 229, 215, 0.28);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 11px 0;
+}
+
+.total-time span {
+  color: #bde5d7;
+  font-size: 0.82rem;
+}
+
+.total-time strong {
+  color: white;
+  font-family: "Segoe UI Mono", "Roboto Mono", ui-monospace, monospace;
+}
+
 .message-list {
   color: var(--foreground);
   display: grid;
@@ -470,6 +490,49 @@ button:focus-visible {
   grid-column: 1 / -1;
 }
 
+.capacity-stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.capacity-stats div {
+  background: var(--soft);
+  border-radius: 7px;
+  padding: 12px;
+}
+
+.capacity-stats span,
+.group-lots span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.78rem;
+  margin-bottom: 5px;
+}
+
+.capacity-stats strong,
+.group-lots strong {
+  font-family: "Segoe UI Mono", "Roboto Mono", ui-monospace, monospace;
+}
+
+.group-lots {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 9px;
+  grid-column: 1 / -1;
+  padding-top: 16px;
+}
+
+.group-lots div {
+  align-items: center;
+  background: #fffaf1;
+  border-radius: 7px;
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
 .group-count {
   display: block;
   font-size: clamp(1.7rem, 3vw, 2.8rem);
@@ -477,17 +540,135 @@ button:focus-visible {
   margin-bottom: 12px;
 }
 
+.waste-panel {
+  margin-top: 18px;
+}
+
+.waste-form {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(230px, 0.8fr) 2.4fr;
+  margin-bottom: 22px;
+}
+
+.waste-toggle {
+  align-self: end;
+  min-height: 42px;
+}
+
+.waste-reasons {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.waste-reasons .check-option {
+  min-height: 42px;
+}
+
+.waste-charts {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.waste-chart {
+  background: #fffaf1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.pie-layout {
+  align-items: center;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 168px minmax(0, 1fr);
+}
+
+.pie-chart {
+  align-items: center;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+  width: 168px;
+}
+
+.pie-chart::after {
+  background: var(--panel);
+  border-radius: 50%;
+  content: "";
+  height: 86px;
+  position: absolute;
+  width: 86px;
+}
+
+.pie-chart strong,
+.pie-chart span {
+  position: relative;
+  z-index: 1;
+}
+
+.pie-chart strong {
+  font-family: "Segoe UI Mono", "Roboto Mono", ui-monospace, monospace;
+  font-size: 1.45rem;
+}
+
+.pie-chart span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.pie-legend {
+  display: grid;
+  gap: 9px;
+}
+
+.pie-legend div {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+}
+
+.pie-legend span {
+  border-radius: 2px;
+  display: block;
+  height: 10px;
+  width: 10px;
+}
+
+.pie-legend p {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.pie-legend strong {
+  font-family: "Segoe UI Mono", "Roboto Mono", ui-monospace, monospace;
+  font-size: 0.86rem;
+}
+
 @media (max-width: 1100px) {
   .workspace,
   .lower-grid,
-  .group-grid {
+  .group-grid,
+  .waste-charts {
     grid-template-columns: 1fr;
   }
 
   .form-grid,
   .form-grid.times,
-  .equipment-grid {
+  .equipment-grid,
+  .waste-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .waste-reasons {
+    grid-column: 1 / -1;
   }
 }
 
@@ -512,8 +693,16 @@ button:focus-visible {
   .mc-grid,
   .stage-row,
   .history-item,
-  .history-actions {
+  .history-actions,
+  .capacity-stats,
+  .waste-form,
+  .waste-reasons,
+  .pie-layout {
     grid-template-columns: 1fr;
+  }
+
+  .pie-chart {
+    margin: 0 auto;
   }
 
   .section-title {
