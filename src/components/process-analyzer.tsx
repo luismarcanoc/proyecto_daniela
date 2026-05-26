@@ -13,6 +13,7 @@ import {
   type AnalysisResult,
   type EquipmentKey,
   type NumberField,
+  type OptionalProcessTime,
   type ProcessInput,
   type ProductKey,
   type RecipeKey,
@@ -169,7 +170,9 @@ function exportExcel(history: SavedAnalysis[]) {
     "Temperatura masa",
     "Tiempo mezclado",
     "Tiempo picado",
+    "Tiempo sobadora",
     "Tiempo porcionado",
+    "Tiempo laminadora",
     "Tiempo boleado",
     "Tiempo fermentación",
     "Tiempo horno",
@@ -203,7 +206,9 @@ function exportExcel(history: SavedAnalysis[]) {
     item.input.temperaturaMasa,
     item.input.tiempoMezclado,
     item.input.tiempoPicado,
+    item.input.tiempoSobadora === "no_aplica" ? "No aplica" : item.input.tiempoSobadora,
     item.input.tiempoPorcionado,
+    item.input.tiempoLaminadora === "no_aplica" ? "No aplica" : item.input.tiempoLaminadora,
     item.input.tiempoBoleado,
     item.input.tiempoFermentacion,
     item.input.tiempoHorno,
@@ -283,14 +288,46 @@ function NumberInput({
   );
 }
 
+function OptionalTimeInput({
+  value,
+  onChange,
+}: {
+  value: OptionalProcessTime;
+  onChange: (value: OptionalProcessTime) => void;
+}) {
+  const mode = value === "no_aplica" ? "no_aplica" : "tiempo";
+
+  return (
+    <div className="optional-time">
+      <select
+        value={mode}
+        onChange={(event) => onChange(event.target.value === "no_aplica" ? "no_aplica" : null)}
+      >
+        <option value="tiempo">Registrar minutos</option>
+        <option value="no_aplica">No aplica</option>
+      </select>
+      {mode === "tiempo" ? (
+        <NumberInput value={value as NumberField} onChange={onChange} />
+      ) : (
+        <span className="na-value">No aplica</span>
+      )}
+    </div>
+  );
+}
+
 function StatusDot({ status }: { status: "ok" | "warning" | "critical" }) {
   return <span className={`status-dot ${status}`} aria-hidden="true" />;
 }
 
 function stageRangeLabel(item: StageResult) {
+  if (item.value === "no_aplica") return "";
   if (item.min === undefined && item.max === undefined) return "";
   if (item.min !== undefined && item.min === item.max) return ` · valor exacto ${item.min} ${item.unit}`;
   return ` · rango ${item.min ?? "0"}-${item.max ?? "sin límite"} ${item.unit}`;
+}
+
+function stageValueLabel(value: StageResult["value"]) {
+  return value === "no_aplica" ? "No aplica" : value ?? "Pendiente";
 }
 
 function wasteBreakdown(items: SavedAnalysis[]) {
@@ -612,7 +649,21 @@ export function ProcessAnalyzer() {
             <h2>Tiempos del proceso</h2>
           </div>
           <div className="form-grid times">
-            {numberFields.map(([key, label]) => (
+            {numberFields.slice(0, 2).map(([key, label]) => (
+              <Field key={key} label={`${label} (min)`}>
+                <NumberInput value={input[key]} onChange={(value) => update(key, value)} />
+              </Field>
+            ))}
+            <Field label="Sobadora (min)">
+              <OptionalTimeInput value={input.tiempoSobadora} onChange={(value) => update("tiempoSobadora", value)} />
+            </Field>
+            <Field label="Porcionado (min)">
+              <NumberInput value={input.tiempoPorcionado} onChange={(value) => update("tiempoPorcionado", value)} />
+            </Field>
+            <Field label="Laminadora (min)">
+              <OptionalTimeInput value={input.tiempoLaminadora} onChange={(value) => update("tiempoLaminadora", value)} />
+            </Field>
+            {numberFields.slice(3).map(([key, label]) => (
               <Field key={key} label={`${label} (min)`}>
                 <NumberInput value={input[key]} onChange={(value) => update(key, value)} />
               </Field>
@@ -679,7 +730,7 @@ export function ProcessAnalyzer() {
                     <strong>{item.name}</strong>
                   </div>
                   <span>
-                    {item.value ?? "Pendiente"} {item.unit}
+                    {stageValueLabel(item.value)} {item.value === "no_aplica" ? "" : item.unit}
                     {stageRangeLabel(item)}
                   </span>
                 </div>

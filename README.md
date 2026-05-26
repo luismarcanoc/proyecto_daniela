@@ -5,6 +5,7 @@ Aplicación web para analizar lotes de producción de panadería, detectar cuell
 ## Funciones
 
 - Registro de lotes con amasadora y horno separados.
+- Registro independiente de laminadora y sobadora, con tiempo en minutos o selección `No aplica`.
 - Alertas por rangos de proceso y por equipos no disponibles.
 - Análisis individual y análisis grupal de hasta 30 lotes guardados.
 - Modelo de fermentadora compartida: cada lote equivale a un carrito, con 18 puestos totales y 3 posiciones de condiciones ideales que se liberan dinámicamente.

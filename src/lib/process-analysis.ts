@@ -10,6 +10,7 @@ export type ProductKey =
 export type RecipeKey = "premezcla_4" | "premezcla_6" | "premezcla_8";
 export type WaterMode = "agua" | "hielo";
 export type NumberField = number | null;
+export type OptionalProcessTime = NumberField | "no_aplica";
 
 export type EquipmentKey =
   | "amasadora_1"
@@ -37,6 +38,8 @@ export type ProcessInput = {
   agregado: WaterMode;
   temperaturaMasa: NumberField;
   tiempoPicado: NumberField;
+  tiempoLaminadora: OptionalProcessTime;
+  tiempoSobadora: OptionalProcessTime;
   tiempoPorcionado: NumberField;
   tiempoBoleado: NumberField;
   tiempoFermentacion: NumberField;
@@ -50,7 +53,7 @@ export type ProcessInput = {
 export type StageResult = {
   id: string;
   name: string;
-  value: NumberField;
+  value: OptionalProcessTime;
   min?: number;
   max?: number;
   target: number;
@@ -150,6 +153,8 @@ const ovenTimeRanges: Record<ProductKey, { min: number; max: number }> = {
 const monteCarloVariables: MonteCarloVariable[] = [
   { name: "Tiempo de mezclado", variation: "variación operativa de ±11 %" },
   { name: "Tiempo de picado con reposo", variation: "variación operativa de ±11 %" },
+  { name: "Tiempo de laminadora", variation: "variación operativa de ±11 % cuando aplica" },
+  { name: "Tiempo de sobadora", variation: "variación operativa de ±11 % cuando aplica" },
   { name: "Tiempo de porcionado", variation: "variación operativa de ±11 %" },
   { name: "Tiempo de boleado", variation: "variación operativa de ±11 %" },
   { name: "Tiempo de fermentación", variation: "variación térmica de ±6 %" },
@@ -161,7 +166,7 @@ const monteCarloVariables: MonteCarloVariable[] = [
   { name: "Equipos dañados", variation: "incrementan presión de la etapa afectada" },
 ];
 
-function isNumber(value: NumberField | undefined): value is number {
+function isNumber(value: OptionalProcessTime | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
@@ -203,8 +208,8 @@ function equipmentPressure(input: ProcessInput, id: string) {
   if (id === "mezclado" && input.equiposDanados.includes(`amasadora_${input.amasadora}`)) return 1.5;
   if (id === "mezclado" && input.equiposDanados.some((item) => item.startsWith("amasadora_"))) return 1.2;
   if (id === "porcionado" && input.equiposDanados.includes("porcionadores")) return 1.45;
-  if (id === "porcionado" && input.equiposDanados.includes("sobadoras")) return 1.18;
-  if (id === "boleado" && input.equiposDanados.includes("laminadoras")) return 1.15;
+  if (id === "sobadora" && input.equiposDanados.includes("sobadoras")) return 1.45;
+  if (id === "laminadora" && input.equiposDanados.includes("laminadoras")) return 1.45;
   if (id === "horno" && input.equiposDanados.includes(`horno_${input.horno}`)) return 1.5;
   if (id === "horno" && input.equiposDanados.some((item) => item.startsWith("horno_"))) return 1.2;
   return 1;
@@ -213,13 +218,28 @@ function equipmentPressure(input: ProcessInput, id: string) {
 function stage(
   id: string,
   name: string,
-  value: NumberField,
+  value: OptionalProcessTime,
   range: { min?: number; max?: number },
   unit = "min",
   note = "",
   pressureFactor = 1,
 ): StageResult {
   const target = range.max ?? range.min ?? (isNumber(value) ? value : 0);
+
+  if (value === "no_aplica") {
+    return {
+      id,
+      name,
+      value,
+      min: range.min,
+      max: range.max,
+      target,
+      unit,
+      pressure: 0,
+      status: "ok",
+      note: "No aplica para este lote.",
+    };
+  }
 
   if (!isNumber(value)) {
     return {
@@ -292,8 +312,8 @@ function measuredStages(stages: StageResult[]): Array<StageResult & { value: num
 
 function totalProcessTime(stages: StageResult[]) {
   const processStages = stages.filter((item) => item.id !== "temperatura_horno");
-  if (processStages.some((item) => !isNumber(item.value))) return null;
-  return processStages.reduce((sum, item) => sum + (item.value ?? 0), 0);
+  if (processStages.some((item) => item.value === null)) return null;
+  return processStages.reduce((sum, item) => sum + (isNumber(item.value) ? item.value : 0), 0);
 }
 
 function simulateStages(stages: StageResult[]) {
@@ -362,6 +382,12 @@ function missingAlerts(input: ProcessInput, alerts: string[]) {
   labels.forEach(([key, label]) => {
     if (!isNumber(input[key] as NumberField)) pushUnique(alerts, `Falta ingresar ${label}.`);
   });
+  if (input.tiempoLaminadora === null) {
+    pushUnique(alerts, "Indique el tiempo de laminadora o seleccione No aplica.");
+  }
+  if (input.tiempoSobadora === null) {
+    pushUnique(alerts, "Indique el tiempo de sobadora o seleccione No aplica.");
+  }
 }
 
 function addEquipmentAlerts(input: ProcessInput, alerts: string[], suggestions: string[]) {
@@ -442,6 +468,15 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
     ),
     stage("picado", "Picado con reposo", input.tiempoPicado, { min: 8, max: 10 }, "min", "Incluye reposo de masa."),
     stage(
+      "sobadora",
+      "Sobadora",
+      input.tiempoSobadora,
+      { max: 15 },
+      "min",
+      "Referencia operativa de flujo de 15 min; seleccione No aplica si el producto no usa sobado.",
+      equipmentPressure(input, "sobadora"),
+    ),
+    stage(
       "porcionado",
       "Porcionado",
       input.tiempoPorcionado,
@@ -449,6 +484,15 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
       "min",
       "Transición hacia formado.",
       equipmentPressure(input, "porcionado"),
+    ),
+    stage(
+      "laminadora",
+      "Laminadora",
+      input.tiempoLaminadora,
+      { max: 15 },
+      "min",
+      "Referencia operativa de flujo de 15 min; seleccione No aplica si el producto no usa laminado.",
+      equipmentPressure(input, "laminadora"),
     ),
     stage(
       "boleado",
@@ -491,7 +535,9 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
     if (item.status === "ok" || !isNumber(item.value)) return;
     if (item.id === "mezclado") pushUnique(suggestions, "Revise la carga y el tiempo de mezclado de la amasadora seleccionada antes de iniciar el siguiente lote.");
     if (item.id === "picado") pushUnique(suggestions, "Mantenga picado con reposo entre 8 y 10 min para no empujar variación hacia formado.");
+    if (item.id === "sobadora") pushUnique(suggestions, "Revise la carga o disponibilidad de sobadora; su tiempo está afectando el flujo hacia porcionado.");
     if (item.id === "porcionado") pushUnique(suggestions, "Refuerce porcionado con personal compartido si se acerca o supera 10 min.");
+    if (item.id === "laminadora") pushUnique(suggestions, "Revise la carga o disponibilidad de laminadora; su tiempo está retrasando el formado del producto.");
     if (item.id === "boleado") pushUnique(suggestions, "Reasigne apoyo a boleado hasta recuperar un tiempo menor o igual a 15 min.");
     if (item.id === "fermentacion") pushUnique(suggestions, "Ajuste la secuencia del lote alrededor de fermentación; mover personal no corrige por sí solo ese tiempo.");
     if (item.id === "horno") pushUnique(suggestions, "Proteja la disponibilidad del horno seleccionado y evite que fermentación libere más producto del que puede cocerse.");
@@ -535,15 +581,22 @@ function startMinute(time: string) {
   return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : 0;
 }
 
-function stageValue(stages: StageResult[], id: string) {
+function stageValue(stages: StageResult[], id: string, noAplicaAsZero = false) {
   const value = stages.find((item) => item.id === id)?.value;
+  if (noAplicaAsZero && value === "no_aplica") return 0;
   return isNumber(value) ? value : null;
 }
 
 function lotParts(stages: StageResult[]) {
-  const beforeIds = ["mezclado", "picado", "porcionado", "boleado"];
+  const beforeValues = [
+    stageValue(stages, "mezclado"),
+    stageValue(stages, "picado"),
+    stageValue(stages, "sobadora", true),
+    stageValue(stages, "porcionado"),
+    stageValue(stages, "laminadora", true),
+    stageValue(stages, "boleado"),
+  ];
   const afterIds = ["horno", "traslado"];
-  const beforeValues = beforeIds.map((id) => stageValue(stages, id));
   const afterValues = afterIds.map((id) => stageValue(stages, id));
   const fermentation = stageValue(stages, "fermentacion");
   if (beforeValues.includes(null) || afterValues.includes(null) || fermentation === null) return null;
@@ -720,6 +773,8 @@ export function defaultInput(): ProcessInput {
     agregado: "agua",
     temperaturaMasa: null,
     tiempoPicado: null,
+    tiempoLaminadora: null,
+    tiempoSobadora: null,
     tiempoPorcionado: null,
     tiempoBoleado: null,
     tiempoFermentacion: null,

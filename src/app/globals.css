@@ -177,6 +177,22 @@ h2 {
   font-weight: 650;
 }
 
+.optional-time {
+  display: grid;
+  gap: 7px;
+}
+
+.na-value {
+  align-items: center;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  display: flex;
+  min-height: 42px;
+  padding: 0 11px;
+}
+
 input,
 select {
   background: #fffaf1;
