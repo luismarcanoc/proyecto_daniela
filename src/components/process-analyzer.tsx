@@ -318,15 +318,16 @@ function PieChart({
   subtitle: string;
   data: Array<{ label: string; value: number }>;
 }) {
-  const total = data.reduce((sum, item) => sum + item.value, 0);
+  const totalProblems = data.reduce((sum, item) => sum + item.value, 0);
+  const totalCauses = data.length;
   let angle = 0;
   const gradient =
-    total === 0
+    totalProblems === 0
       ? "#ebe2d6"
       : `conic-gradient(${data
           .map((item, index) => {
             const start = angle;
-            angle += (item.value / total) * 360;
+            angle += (item.value / totalProblems) * 360;
             return `${pieColors[index % pieColors.length]} ${start}deg ${angle}deg`;
           })
           .join(", ")})`;
@@ -338,11 +339,16 @@ function PieChart({
         <p>{subtitle}</p>
       </div>
       <div className="pie-layout">
-        <div className="pie-chart" style={{ background: gradient }} role="img" aria-label={`${title}: ${total} causas registradas`}>
-          <strong>{total}</strong>
+        <div
+          className="pie-chart"
+          style={{ background: gradient }}
+          role="img"
+          aria-label={`${title}: ${totalCauses} causas distintas y ${totalProblems} problemas registrados`}
+        >
+          <strong>{totalCauses}</strong>
           <span>causas</span>
         </div>
-        {total === 0 ? (
+        {totalProblems === 0 ? (
           <p className="empty">No hay motivos de merma registrados para esta selección.</p>
         ) : (
           <div className="pie-legend">
@@ -350,7 +356,9 @@ function PieChart({
               <div key={item.label}>
                 <span style={{ background: pieColors[index % pieColors.length] }} />
                 <p>{item.label}</p>
-                <strong>{Math.round((item.value / total) * 100)}%</strong>
+                <strong>
+                  {item.value} {item.value === 1 ? "problema" : "problemas"} · {Math.round((item.value / totalProblems) * 100)}%
+                </strong>
               </div>
             ))}
           </div>
