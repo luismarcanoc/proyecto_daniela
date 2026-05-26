@@ -572,6 +572,16 @@ button:focus-visible {
   min-height: 42px;
 }
 
+.waste-warning {
+  background: #fff3f0;
+  border: 1px solid rgba(183, 53, 53, 0.2);
+  border-radius: 7px;
+  color: var(--critical);
+  font-size: 0.82rem;
+  margin: 0;
+  padding: 10px 12px;
+}
+
 .waste-reasons {
   display: grid;
   gap: 8px;

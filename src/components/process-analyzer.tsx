@@ -6,6 +6,7 @@ import {
   analyzeProcess,
   defaultInput,
   equipmentOptions,
+  isProcessComplete,
   normalizeInput,
   products,
   recipes,
@@ -155,11 +156,11 @@ function excelText(value: string | number | null | undefined) {
 
 function exportExcel(history: SavedAnalysis[]) {
   const columns = [
-    "Fecha registro",
     "Fecha lote",
     "Lote",
     "Producto",
     "Receta",
+    "Agregado (agua/hielo)",
     "Amasadora",
     "Inicio amasado",
     "Horno",
@@ -191,11 +192,11 @@ function exportExcel(history: SavedAnalysis[]) {
   ];
 
   const rows = history.map((item) => [
-    item.createdAt,
     item.input.fecha,
     item.input.lote,
     products[item.input.producto],
     recipes[item.input.receta],
+    item.input.agregado === "agua" ? "Agua" : "Hielo",
     item.input.amasadora,
     item.input.horaInicioAmasado,
     item.input.horno,
@@ -249,6 +250,7 @@ function exportExcel(history: SavedAnalysis[]) {
   anchor.download = "base-analisis-lotes.xls";
   anchor.click();
   URL.revokeObjectURL(url);
+  window.alert("La exportación del archivo de Excel con lotes fue exitosa.");
 }
 
 function Field({
@@ -270,20 +272,30 @@ function NumberInput({
   value,
   onChange,
   min = 0,
-  max,
+  max = 1000,
+  integer = false,
 }: {
   value: NumberField;
   onChange: (value: NumberField) => void;
   min?: number;
-  max?: number;
+  max?: number | null;
+  integer?: boolean;
 }) {
   return (
     <input
       type="number"
       min={min}
-      max={max}
+      max={max ?? undefined}
+      step={integer ? 1 : "any"}
       value={value ?? ""}
-      onChange={(event) => onChange(numberValue(event.target.value))}
+      onChange={(event) => {
+        const parsed = numberValue(event.target.value);
+        if (parsed !== null && ((max !== null && parsed > max) || (integer && !Number.isInteger(parsed)))) {
+          onChange(null);
+          return;
+        }
+        onChange(parsed);
+      }}
     />
   );
 }
@@ -333,7 +345,7 @@ function stageValueLabel(value: StageResult["value"]) {
 function wasteBreakdown(items: SavedAnalysis[]) {
   const count = new Map<WasteReasonKey, number>();
   items
-    .filter((item) => item.wasteReported)
+    .filter((item) => item.wasteReported && isProcessComplete(item.input))
     .forEach((item) => item.wasteReasons.forEach((reason) => count.set(reason, (count.get(reason) ?? 0) + 1)));
 
   return [...count.entries()].map(([reason, value]) => ({
@@ -420,9 +432,10 @@ export function ProcessAnalyzer() {
     [selectedAnalyses],
   );
   const wasteLot = history.find((item) => item.id === wasteLotId) ?? null;
+  const wasteLotIsComplete = wasteLot ? isProcessComplete(wasteLot.input) : false;
   const individualWasteData = wasteLot ? wasteBreakdown([wasteLot]) : [];
   const groupWasteData = wasteBreakdown(selectedAnalyses);
-  const groupWasteCount = selectedAnalyses.filter((item) => item.wasteReported).length;
+  const groupWasteCount = selectedAnalyses.filter((item) => item.wasteReported && isProcessComplete(item.input)).length;
 
   useEffect(() => {
     const raw = window.localStorage.getItem(storageKey);
@@ -510,6 +523,10 @@ export function ProcessAnalyzer() {
 
   function updateWaste(reported: boolean) {
     if (!wasteLot) return;
+    if (reported && !wasteLotIsComplete) {
+      window.alert("No se puede registrar merma: el lote tiene datos de proceso incompletos.");
+      return;
+    }
     setHistory((current) =>
       current.map((item) =>
         item.id === wasteLot.id
@@ -525,6 +542,10 @@ export function ProcessAnalyzer() {
 
   function toggleWasteReason(reason: WasteReasonKey) {
     if (!wasteLot) return;
+    if (!wasteLotIsComplete) {
+      window.alert("No se puede registrar merma: complete primero todos los datos del lote.");
+      return;
+    }
     setHistory((current) =>
       current.map((item) => {
         if (item.id !== wasteLot.id) return item;
@@ -609,16 +630,16 @@ export function ProcessAnalyzer() {
               </select>
             </Field>
             <Field label="Temperatura del área (°C)">
-              <NumberInput min={0} max={50} value={input.temperaturaArea} onChange={(value) => update("temperaturaArea", value)} />
+              <NumberInput value={input.temperaturaArea} onChange={(value) => update("temperaturaArea", value)} />
             </Field>
             <Field label="Humedad relativa (%)">
               <NumberInput value={input.humedadRelativa} onChange={(value) => update("humedadRelativa", value)} />
             </Field>
             <Field label="Peso pre-mezcla (g)">
-              <NumberInput value={input.pesoPremezcla} onChange={(value) => update("pesoPremezcla", value)} />
+              <NumberInput max={null} value={input.pesoPremezcla} onChange={(value) => update("pesoPremezcla", value)} />
             </Field>
             <Field label="Operarios boleando">
-              <NumberInput min={0} value={input.operariosBoleado} onChange={(value) => update("operariosBoleado", value)} />
+              <NumberInput integer value={input.operariosBoleado} onChange={(value) => update("operariosBoleado", value)} />
             </Field>
             <Field label="Temperatura de masa (°C)">
               <NumberInput value={input.temperaturaMasa} onChange={(value) => update("temperaturaMasa", value)} />
@@ -922,15 +943,23 @@ export function ProcessAnalyzer() {
                 </select>
               </Field>
               <label className="check-option waste-toggle">
-                <input type="checkbox" checked={wasteLot?.wasteReported ?? false} onChange={(event) => updateWaste(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  disabled={!wasteLotIsComplete}
+                  checked={wasteLot?.wasteReported ?? false}
+                  onChange={(event) => updateWaste(event.target.checked)}
+                />
                 <span>Este lote tuvo merma</span>
               </label>
+              {!wasteLotIsComplete ? (
+                <p className="waste-warning">Este lote tiene datos incompletos. Complete el proceso antes de registrar merma.</p>
+              ) : null}
               <div className="waste-reasons">
                 {Object.entries(wasteReasons).map(([key, reason]) => (
                   <label className="check-option" key={key}>
                     <input
                       type="checkbox"
-                      disabled={!wasteLot?.wasteReported}
+                      disabled={!wasteLotIsComplete || !wasteLot?.wasteReported}
                       checked={wasteLot?.wasteReasons.includes(key as WasteReasonKey) ?? false}
                       onChange={() => toggleWasteReason(key as WasteReasonKey)}
                     />

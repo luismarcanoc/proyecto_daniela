@@ -390,6 +390,34 @@ function missingAlerts(input: ProcessInput, alerts: string[]) {
   }
 }
 
+function operationalLimitAlerts(input: ProcessInput, alerts: string[]) {
+  const limitedValues: Array<[OptionalProcessTime, string]> = [
+    [input.temperaturaArea, "temperatura del área"],
+    [input.humedadRelativa, "humedad relativa"],
+    [input.operariosBoleado, "cantidad de operarios boleando"],
+    [input.temperaturaMasa, "temperatura de masa"],
+    [input.temperaturaHorno, "temperatura de horno"],
+    [input.tiempoMezclado, "tiempo de mezclado"],
+    [input.tiempoPicado, "tiempo de picado"],
+    [input.tiempoSobadora, "tiempo de sobadora"],
+    [input.tiempoPorcionado, "tiempo de porcionado"],
+    [input.tiempoLaminadora, "tiempo de laminadora"],
+    [input.tiempoBoleado, "tiempo de boleado"],
+    [input.tiempoFermentacion, "tiempo de fermentación"],
+    [input.tiempoHorno, "tiempo de horno"],
+    [input.tiempoTraslado, "tiempo de traslado"],
+  ];
+
+  limitedValues.forEach(([value, label]) => {
+    if (isNumber(value) && value > 1000) {
+      pushUnique(alerts, `El valor de ${label} no puede superar 1000.`);
+    }
+  });
+  if (isNumber(input.operariosBoleado) && !Number.isInteger(input.operariosBoleado)) {
+    pushUnique(alerts, "La cantidad de operarios boleando debe ser un número entero.");
+  }
+}
+
 function addEquipmentAlerts(input: ProcessInput, alerts: string[], suggestions: string[]) {
   const damaged = input.equiposDanados;
   if (damaged.length === 0) return;
@@ -431,6 +459,7 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
   const ovenTemp = ovenTemperatureRange(input.producto, input.horno);
 
   missingAlerts(input, alerts);
+  operationalLimitAlerts(input, alerts);
   addEquipmentAlerts(input, alerts, suggestions);
 
   if (isNumber(input.temperaturaArea) && input.temperaturaArea < 22) {
@@ -471,9 +500,9 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
       "sobadora",
       "Sobadora",
       input.tiempoSobadora,
-      { max: 15 },
+      { min: 4, max: 7 },
       "min",
-      "Referencia operativa de flujo de 15 min; seleccione No aplica si el producto no usa sobado.",
+      "Debe estar entre 4 y 7 min cuando aplica.",
       equipmentPressure(input, "sobadora"),
     ),
     stage(
@@ -489,9 +518,9 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
       "laminadora",
       "Laminadora",
       input.tiempoLaminadora,
-      { max: 15 },
+      { min: 3, max: 6 },
       "min",
-      "Referencia operativa de flujo de 15 min; seleccione No aplica si el producto no usa laminado.",
+      "Debe estar entre 3 y 6 min cuando aplica.",
       equipmentPressure(input, "laminadora"),
     ),
     stage(
@@ -794,6 +823,33 @@ export function normalizeInput(input: Partial<ProcessInput>): ProcessInput {
     horno: input.horno ?? fallback.horno,
     equiposDanados: input.equiposDanados ?? [],
   };
+}
+
+export function isProcessComplete(input: ProcessInput) {
+  const requiredNumbers: NumberField[] = [
+    input.temperaturaArea,
+    input.humedadRelativa,
+    input.pesoPremezcla,
+    input.operariosBoleado,
+    input.temperaturaMasa,
+    input.tiempoMezclado,
+    input.tiempoPicado,
+    input.tiempoPorcionado,
+    input.tiempoBoleado,
+    input.tiempoFermentacion,
+    input.tiempoHorno,
+    input.temperaturaHorno,
+    input.tiempoTraslado,
+  ];
+
+  return (
+    input.fecha.trim() !== "" &&
+    input.lote.trim() !== "" &&
+    input.horaInicioAmasado.trim() !== "" &&
+    requiredNumbers.every(isNumber) &&
+    input.tiempoSobadora !== null &&
+    input.tiempoLaminadora !== null
+  );
 }
 
 export function scoreStage(stageResult: StageResult) {
