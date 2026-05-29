@@ -7,6 +7,7 @@ import {
   defaultInput,
   equipmentOptions,
   isProcessComplete,
+  laminadoraAplica,
   normalizeInput,
   products,
   recipes,
@@ -303,16 +304,19 @@ function NumberInput({
 function OptionalTimeInput({
   value,
   onChange,
+  disabled = false,
 }: {
   value: OptionalProcessTime;
   onChange: (value: OptionalProcessTime) => void;
+  disabled?: boolean;
 }) {
-  const mode = value === "no_aplica" ? "no_aplica" : "tiempo";
+  const mode = disabled || value === "no_aplica" ? "no_aplica" : "tiempo";
 
   return (
     <div className="optional-time">
       <select
         value={mode}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value === "no_aplica" ? "no_aplica" : null)}
       >
         <option value="tiempo">Registrar minutos</option>
@@ -427,9 +431,17 @@ export function ProcessAnalyzer() {
     () => history.filter((item) => selectedIds.includes(item.id)).slice(0, 30),
     [history, selectedIds],
   );
-  const groupResult = useMemo(
-    () => (selectedAnalyses.length > 0 ? analyzeGroup(selectedAnalyses.map((item) => item.input)) : null),
+  const selectedDates = useMemo(
+    () => [...new Set(selectedAnalyses.map((item) => item.input.fecha).filter(Boolean))],
     [selectedAnalyses],
+  );
+  const groupDateMismatch = selectedDates.length > 1;
+  const groupResult = useMemo(
+    () =>
+      selectedAnalyses.length > 0 && !groupDateMismatch
+        ? analyzeGroup(selectedAnalyses.map((item) => item.input))
+        : null,
+    [groupDateMismatch, selectedAnalyses],
   );
   const wasteLot = history.find((item) => item.id === wasteLotId) ?? null;
   const wasteLotIsComplete = wasteLot ? isProcessComplete(wasteLot.input) : false;
@@ -467,6 +479,12 @@ export function ProcessAnalyzer() {
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(history));
   }, [history]);
+
+  useEffect(() => {
+    if (!laminadoraAplica(input.producto) && input.tiempoLaminadora !== "no_aplica") {
+      setInput((current) => ({ ...current, tiempoLaminadora: "no_aplica" }));
+    }
+  }, [input.producto, input.tiempoLaminadora]);
 
   function update<K extends keyof ProcessInput>(key: K, value: ProcessInput[K]) {
     setInput((current) => ({ ...current, [key]: value }));
@@ -682,7 +700,11 @@ export function ProcessAnalyzer() {
               <NumberInput value={input.tiempoPorcionado} onChange={(value) => update("tiempoPorcionado", value)} />
             </Field>
             <Field label="Laminadora (min)">
-              <OptionalTimeInput value={input.tiempoLaminadora} onChange={(value) => update("tiempoLaminadora", value)} />
+              <OptionalTimeInput
+                value={input.tiempoLaminadora}
+                disabled={!laminadoraAplica(input.producto)}
+                onChange={(value) => update("tiempoLaminadora", value)}
+              />
             </Field>
             {numberFields.slice(3).map(([key, label]) => (
               <Field key={key} label={`${label} (min)`}>
@@ -839,7 +861,9 @@ export function ProcessAnalyzer() {
           <h2>Análisis grupal de lotes</h2>
           <p>Cada lote corresponde a un carrito; al salir, libera su posición para el siguiente lote.</p>
         </div>
-        {!groupResult ? (
+        {groupDateMismatch ? (
+          <p className="empty">El Monte Carlo grupal solo aplica para lotes del mismo dia. Seleccione lotes con una sola fecha de lote.</p>
+        ) : !groupResult ? (
           <p className="empty">El análisis grupal aparecerá cuando seleccione al menos un lote guardado.</p>
         ) : (
           <div className="group-grid">
@@ -854,6 +878,18 @@ export function ProcessAnalyzer() {
                 <div>
                   <span>Lotes fuera de zona ideal</span>
                   <strong>{groupResult.lotsOutsideIdealZone}</strong>
+                </div>
+                <div>
+                  <span>Lotes esperando horno</span>
+                  <strong>{groupResult.lotsWaitingForOven}</strong>
+                </div>
+                <div>
+                  <span>Espera maxima horno</span>
+                  <strong>{groupResult.maxOvenWait} min</strong>
+                </div>
+                <div>
+                  <span>Riesgo sobrefermentacion</span>
+                  <strong>{groupResult.lotsAtOverFermentationRisk}</strong>
                 </div>
               </div>
               <div className="frequency-list">
@@ -877,7 +913,7 @@ export function ProcessAnalyzer() {
                   <strong>{groupResult.monteCarlo.p90} min</strong>
                 </div>
                 <div>
-                  <span>Riesgo</span>
+                  <span>Riesgo conjunto</span>
                   <strong>{groupResult.monteCarlo.delayProbability}%</strong>
                 </div>
               </div>

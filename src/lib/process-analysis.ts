@@ -92,6 +92,9 @@ export type GroupAnalysisResult = {
   topBottlenecks: Array<{ stage: string; lots: number }>;
   maxConcurrentCarts: number;
   lotsOutsideIdealZone: number;
+  lotsWaitingForOven: number;
+  lotsAtOverFermentationRisk: number;
+  maxOvenWait: number;
   lotTotals: Array<{ lote: string; totalTime: number | null }>;
   monteCarlo: MonteCarloResult;
 };
@@ -191,6 +194,10 @@ function ovenTimeRange(input: ProcessInput) {
   return ovenTimeRanges[input.producto];
 }
 
+export function laminadoraAplica(product: ProductKey) {
+  return product === "perro_caliente" || product === "deli";
+}
+
 function temperatureRule(range: { min: number; max: number }) {
   if (range.min === range.max) return `exactamente ${range.min} °C`;
   return `entre ${range.min} °C y ${range.max} °C`;
@@ -223,6 +230,7 @@ function stage(
   unit = "min",
   note = "",
   pressureFactor = 1,
+  options: { lowerAffectsBottleneck?: boolean } = {},
 ): StageResult {
   const target = range.max ?? range.min ?? (isNumber(value) ? value : 0);
 
@@ -258,8 +266,10 @@ function stage(
 
   const upperPressure = range.max ? value / range.max : 1;
   const lowerPressure = range.min && value < range.min ? range.min / Math.max(value, 0.1) : 1;
-  const pressure = Math.max(upperPressure, lowerPressure) * pressureFactor;
-  const outBy = Math.abs(pressure - 1);
+  const statusPressure = Math.max(upperPressure, lowerPressure) * pressureFactor;
+  const bottleneckPressure = Math.max(upperPressure, options.lowerAffectsBottleneck === false ? 1 : lowerPressure);
+  const pressure = bottleneckPressure * pressureFactor;
+  const outBy = Math.abs(statusPressure - 1);
 
   return {
     id,
@@ -319,9 +329,11 @@ function totalProcessTime(stages: StageResult[]) {
 function simulateStages(stages: StageResult[]) {
   return measuredStages(stages).map((item) => {
     const simulatedValue = randomAround(item.value, spreadForStage(item.id));
+    const simulatedLowerPressure =
+      item.id === "picado" ? 1 : item.min && simulatedValue < item.min ? item.min / Math.max(simulatedValue, 0.1) : 1;
     const simulatedPressure = Math.max(
       item.max ? simulatedValue / item.max : 1,
-      item.min && simulatedValue < item.min ? item.min / Math.max(simulatedValue, 0.1) : 1,
+      simulatedLowerPressure,
     );
     return { ...item, simulatedValue, simulatedPressure };
   });
@@ -382,7 +394,7 @@ function missingAlerts(input: ProcessInput, alerts: string[]) {
   labels.forEach(([key, label]) => {
     if (!isNumber(input[key] as NumberField)) pushUnique(alerts, `Falta ingresar ${label}.`);
   });
-  if (input.tiempoLaminadora === null) {
+  if (laminadoraAplica(input.producto) && input.tiempoLaminadora === null) {
     pushUnique(alerts, "Indique el tiempo de laminadora o seleccione No aplica.");
   }
   if (input.tiempoSobadora === null) {
@@ -401,7 +413,7 @@ function operationalLimitAlerts(input: ProcessInput, alerts: string[]) {
     [input.tiempoPicado, "tiempo de picado"],
     [input.tiempoSobadora, "tiempo de sobadora"],
     [input.tiempoPorcionado, "tiempo de porcionado"],
-    [input.tiempoLaminadora, "tiempo de laminadora"],
+    [laminadoraAplica(input.producto) ? input.tiempoLaminadora : "no_aplica", "tiempo de laminadora"],
     [input.tiempoBoleado, "tiempo de boleado"],
     [input.tiempoFermentacion, "tiempo de fermentación"],
     [input.tiempoHorno, "tiempo de horno"],
@@ -457,6 +469,7 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
   const productName = products[input.producto];
   const premix = premixRanges[input.receta];
   const ovenTemp = ovenTemperatureRange(input.producto, input.horno);
+  const effectiveLaminadora = laminadoraAplica(input.producto) ? input.tiempoLaminadora : "no_aplica";
 
   missingAlerts(input, alerts);
   operationalLimitAlerts(input, alerts);
@@ -495,7 +508,9 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
       `Amasadora ${input.amasadora}; inicio ${input.horaInicioAmasado || "pendiente"}.`,
       equipmentPressure(input, "mezclado"),
     ),
-    stage("picado", "Picado con reposo", input.tiempoPicado, { min: 8, max: 10 }, "min", "Incluye reposo de masa."),
+    stage("picado", "Picado con reposo", input.tiempoPicado, { min: 8, max: 10 }, "min", "Incluye reposo de masa.", 1, {
+      lowerAffectsBottleneck: false,
+    }),
     stage(
       "sobadora",
       "Sobadora",
@@ -517,7 +532,7 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
     stage(
       "laminadora",
       "Laminadora",
-      input.tiempoLaminadora,
+      effectiveLaminadora,
       { min: 3, max: 6 },
       "min",
       "Debe estar entre 3 y 6 min cuando aplica.",
@@ -625,25 +640,35 @@ function lotParts(stages: StageResult[]) {
     stageValue(stages, "laminadora", true),
     stageValue(stages, "boleado"),
   ];
-  const afterIds = ["horno", "traslado"];
-  const afterValues = afterIds.map((id) => stageValue(stages, id));
+  const oven = stageValue(stages, "horno");
+  const transfer = stageValue(stages, "traslado");
   const fermentation = stageValue(stages, "fermentacion");
-  if (beforeValues.includes(null) || afterValues.includes(null) || fermentation === null) return null;
+  const fermentationStage = stages.find((item) => item.id === "fermentacion");
+  if (beforeValues.includes(null) || oven === null || transfer === null || fermentation === null) return null;
 
   return {
     before: beforeValues.reduce<number>((sum, value) => sum + (value ?? 0), 0),
     fermentation,
-    after: afterValues.reduce<number>((sum, value) => sum + (value ?? 0), 0),
+    fermentationMax: fermentationStage?.max ?? fermentation,
+    oven,
+    transfer,
   };
 }
 
 function fermentationSchedule(
-  lots: Array<{ input: ProcessInput; parts: { before: number; fermentation: number; after: number } }>,
+  lots: Array<{
+    input: ProcessInput;
+    parts: { before: number; fermentation: number; fermentationMax: number; oven: number; transfer: number };
+  }>,
   randomize = false,
 ) {
   const slotAvailability = Array.from({ length: 18 }, () => 0);
+  const ovenAvailability: Record<ProcessInput["horno"], number> = { "1": 0, "2": 0, "3": 0 };
   const intervals: Array<{ start: number; end: number }> = [];
   let lotsOutsideIdealZone = 0;
+  let lotsWaitingForOven = 0;
+  let lotsAtOverFermentationRisk = 0;
+  let maxOvenWait = 0;
   let waitingOccurred = false;
   let latestCompletion = 0;
   const earliestStart = Math.min(...lots.map(({ input }) => startMinute(input.horaInicioAmasado)));
@@ -653,8 +678,6 @@ function fermentationSchedule(
     .forEach(({ input, parts }) => {
       const arrival = startMinute(input.horaInicioAmasado) + parts.before;
       let usedNonIdeal = false;
-      let lotLeavesFermenter = arrival;
-
       const availableSlot = slotAvailability.findIndex((availableAt) => availableAt <= arrival);
       const firstFree = Math.min(...slotAvailability);
       const slot = availableSlot >= 0 ? availableSlot : slotAvailability.indexOf(firstFree);
@@ -664,12 +687,21 @@ function fermentationSchedule(
       const leaves = enters + parts.fermentation * delayFactor;
       if (enters > arrival) waitingOccurred = true;
       if (outsideIdeal) usedNonIdeal = true;
-      intervals.push({ start: enters, end: leaves });
-      slotAvailability[slot] = leaves;
-      lotLeavesFermenter = leaves;
+      const ovenStart = Math.max(leaves, ovenAvailability[input.horno]);
+      const ovenWait = ovenStart - leaves;
+      const ovenEnd = ovenStart + parts.oven;
+      ovenAvailability[input.horno] = ovenEnd;
+      intervals.push({ start: enters, end: ovenStart });
+      slotAvailability[slot] = ovenStart;
+
+      if (ovenWait > 0) lotsWaitingForOven += 1;
+      maxOvenWait = Math.max(maxOvenWait, ovenWait);
+      if (ovenWait > 0 || leaves - enters + ovenWait > parts.fermentationMax) {
+        lotsAtOverFermentationRisk += 1;
+      }
 
       if (usedNonIdeal) lotsOutsideIdealZone += 1;
-      latestCompletion = Math.max(latestCompletion, lotLeavesFermenter + parts.after);
+      latestCompletion = Math.max(latestCompletion, ovenEnd + parts.transfer);
     });
 
   const events = intervals
@@ -689,6 +721,9 @@ function fermentationSchedule(
     cycleTime: Math.max(0, latestCompletion - earliestStart),
     maxConcurrentCarts,
     lotsOutsideIdealZone,
+    lotsWaitingForOven,
+    lotsAtOverFermentationRisk,
+    maxOvenWait: Math.round(maxOvenWait),
     waitingOccurred,
   };
 }
@@ -711,7 +746,15 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
   const nominalSchedule =
     schedulableLots.length > 0
       ? fermentationSchedule(schedulableLots)
-      : { cycleTime: 0, maxConcurrentCarts: 0, lotsOutsideIdealZone: 0, waitingOccurred: false };
+      : {
+          cycleTime: 0,
+          maxConcurrentCarts: 0,
+          lotsOutsideIdealZone: 0,
+          lotsWaitingForOven: 0,
+          lotsAtOverFermentationRisk: 0,
+          maxOvenWait: 0,
+          waitingOccurred: false,
+        };
 
   if (nominalSchedule.lotsOutsideIdealZone > 0) {
     pushUnique(
@@ -721,6 +764,19 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
   }
   if (nominalSchedule.waitingOccurred) {
     pushUnique(alerts, "La cola de fermentadora obliga a uno o más carritos a esperar por disponibilidad.");
+  }
+
+  if (nominalSchedule.lotsWaitingForOven > 0) {
+    pushUnique(
+      alerts,
+      `${nominalSchedule.lotsWaitingForOven} lote(s) esperan horno despues de fermentar; esa espera puede causar sobrefermentacion.`,
+    );
+  }
+  if (nominalSchedule.lotsAtOverFermentationRisk > 0) {
+    pushUnique(
+      alerts,
+      `${nominalSchedule.lotsAtOverFermentationRisk} lote(s) presentan riesgo de sobrefermentacion por zona no ideal o espera antes de horno.`,
+    );
   }
 
   const iterations = 1200;
@@ -742,10 +798,19 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
     const schedule =
       simulatedLots.length > 0
         ? fermentationSchedule(simulatedLots, true)
-        : { cycleTime: 0, maxConcurrentCarts: 0, lotsOutsideIdealZone: 0, waitingOccurred: false };
+        : {
+            cycleTime: 0,
+            maxConcurrentCarts: 0,
+            lotsOutsideIdealZone: 0,
+            lotsWaitingForOven: 0,
+            lotsAtOverFermentationRisk: 0,
+            maxOvenWait: 0,
+            waitingOccurred: false,
+          };
 
     totals.push(schedule.cycleTime);
-    const hasFermentationDelay = schedule.lotsOutsideIdealZone > 0 || schedule.waitingOccurred;
+    const hasFermentationDelay =
+      schedule.lotsOutsideIdealZone > 0 || schedule.waitingOccurred || schedule.lotsAtOverFermentationRisk > 0;
     delays.push(hasFermentationDelay);
     if (hasFermentationDelay) {
       simulatedBottlenecks.set("Fermentación compartida", (simulatedBottlenecks.get("Fermentación compartida") ?? 0) + 1);
@@ -762,6 +827,9 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
     alerts,
     maxConcurrentCarts: nominalSchedule.maxConcurrentCarts,
     lotsOutsideIdealZone: nominalSchedule.lotsOutsideIdealZone,
+    lotsWaitingForOven: nominalSchedule.lotsWaitingForOven,
+    lotsAtOverFermentationRisk: nominalSchedule.lotsAtOverFermentationRisk,
+    maxOvenWait: nominalSchedule.maxOvenWait,
     lotTotals: selected.map((input, index) => ({
       lote: input.lote,
       totalTime: analyses[index].totalTime,
@@ -781,7 +849,10 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
         }))
         .sort((a, b) => b.probability - a.probability)
         .slice(0, 5),
-      variables: monteCarloVariables,
+      variables: [
+        ...monteCarloVariables,
+        { name: "Cola de hornos", variation: "si el horno del lote esta ocupado, el lote espera y aumenta el riesgo de sobrefermentacion" },
+      ],
     },
   };
 }
@@ -848,7 +919,7 @@ export function isProcessComplete(input: ProcessInput) {
     input.horaInicioAmasado.trim() !== "" &&
     requiredNumbers.every(isNumber) &&
     input.tiempoSobadora !== null &&
-    input.tiempoLaminadora !== null
+    (!laminadoraAplica(input.producto) || input.tiempoLaminadora !== null)
   );
 }
 
