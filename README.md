@@ -12,7 +12,8 @@ Aplicación web para analizar lotes de producción de panadería, detectar cuell
 - Alertas por rangos de proceso y por equipos no disponibles.
 - Análisis individual y análisis grupal de hasta 30 lotes guardados.
 - Modelo de fermentadora compartida: cada lote equivale a un carrito, con 18 puestos totales y 3 posiciones de condiciones ideales que se liberan dinámicamente.
-- Tiempo total de proceso por lote y variables de Monte Carlo visibles en la pantalla.
+- Tiempo transcurrido real desde mezclado hasta traslado a empaquetado, calculado por horas para respetar procesos simultáneos.
+- Suma independiente de duraciones para evaluar etapas, cuellos de botella y Monte Carlo.
 - Registro de merma en kg con decimales por tipo de defecto, con gráficos individual/conjunto.
 - Actualización automática del análisis guardado cuando coinciden fecha y número de lote.
 - Registro de merma habilitado únicamente para lotes con información completa.

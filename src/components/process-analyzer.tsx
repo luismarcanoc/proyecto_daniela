@@ -197,7 +197,8 @@ function exportExcel(history: SavedAnalysis[]) {
     "Tiempo traslado",
     "Equipos dañados",
     "Cuello individual",
-    "Tiempo total",
+    "Suma duraciones evaluadas",
+    "Tiempo transcurrido hasta empaquetado",
     "P50 Monte Carlo",
     "P90 Monte Carlo",
     "Riesgo atraso",
@@ -258,6 +259,7 @@ function exportExcel(history: SavedAnalysis[]) {
     item.input.tiempoTraslado,
     item.input.equiposDanados.map((key) => equipmentOptions[key]).join(", "),
     item.result.bottleneck.name,
+    item.result.stageDurationTotal,
     item.result.totalTime,
     item.result.monteCarlo.p50,
     item.result.monteCarlo.p90,
@@ -812,7 +814,7 @@ export function ProcessAnalyzer() {
           </div>
 
           <div className="section-title compact form-section-title">
-            <h2>Resto de procesos</h2>
+            <h2>Tiempo de procesos</h2>
             <p>La duración se calcula automáticamente con la hora de inicio y la hora final.</p>
           </div>
           <div className="form-grid times">
@@ -951,8 +953,12 @@ export function ProcessAnalyzer() {
               <strong>{scoreStage(result.bottleneck)}%</strong>
             </div>
             <div className="total-time">
-              <span>Tiempo total del lote</span>
+              <span>Tiempo transcurrido hasta empaquetado</span>
               <strong>{result.totalTime === null ? "Pendiente" : `${result.totalTime} min`}</strong>
+            </div>
+            <div className="total-time">
+              <span>Suma de duraciones evaluadas</span>
+              <strong>{result.stageDurationTotal === null ? "Pendiente" : `${result.stageDurationTotal} min`}</strong>
             </div>
             <p>{result.bottleneck.note}</p>
           </section>
@@ -1013,7 +1019,7 @@ export function ProcessAnalyzer() {
 
         <div className="panel monte-panel">
           <div className="section-title compact">
-            <h2>Monte Carlo individual</h2>
+            <h2>Monte Carlo individual por duraciones</h2>
           </div>
           <div className="mc-grid">
             <div>
@@ -1160,7 +1166,7 @@ export function ProcessAnalyzer() {
               </div>
             </div>
             <div className="group-lots">
-              <p className="eyebrow">Tiempo completo por lote</p>
+              <p className="eyebrow">Tiempo transcurrido hasta empaquetado por lote</p>
               {groupResult.lotTotals.map((item) => (
                 <div key={item.lote}>
                   <span>{item.lote} · 1 carrito</span>

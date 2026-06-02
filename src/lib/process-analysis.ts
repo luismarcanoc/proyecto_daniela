@@ -105,6 +105,7 @@ export type AnalysisResult = {
   stages: StageResult[];
   alerts: string[];
   suggestions: string[];
+  stageDurationTotal: number | null;
   totalTime: number | null;
   monteCarlo: MonteCarloResult;
 };
@@ -372,6 +373,10 @@ function totalProcessTime(stages: StageResult[]) {
   const processStages = stages.filter((item) => item.id !== "temperatura_horno");
   if (processStages.some((item) => item.value === null)) return null;
   return processStages.reduce((sum, item) => sum + (isNumber(item.value) ? item.value : 0), 0);
+}
+
+function elapsedCompletionTime(input: ProcessInput) {
+  return calculateDuration(input.horaInicioAmasado, input.horaFinTraslado);
 }
 
 function simulateStages(stages: StageResult[]) {
@@ -680,7 +685,8 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
     stages: [...stages, temperatureStage],
     alerts,
     suggestions,
-    totalTime: totalProcessTime(stages),
+    stageDurationTotal: totalProcessTime(stages),
+    totalTime: elapsedCompletionTime(input),
     monteCarlo: runMonteCarlo(stages),
   };
 }
