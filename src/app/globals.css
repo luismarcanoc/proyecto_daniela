@@ -338,6 +338,20 @@ button:focus-visible {
   border-left-color: var(--warning);
 }
 
+.dead-time-total {
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+.dead-time-total strong {
+  color: var(--foreground);
+  font-family: "Segoe UI Mono", "Roboto Mono", ui-monospace, monospace;
+}
+
+.wait-list li {
+  border-left-color: var(--critical);
+}
+
 .empty {
   color: var(--muted);
   margin: 0;

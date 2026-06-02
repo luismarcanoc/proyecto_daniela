@@ -93,11 +93,25 @@ export type MonteCarloVariable = {
 
 export type MonteCarloResult = {
   iterations: number;
-  p50: number;
-  p90: number;
-  delayProbability: number;
+  actualTime: number | null;
+  optimalTime: number | null;
+  p50: number | null;
+  p90: number | null;
+  delayProbability: number | null;
   bottleneckFrequency: Array<{ stage: string; probability: number }>;
   variables: MonteCarloVariable[];
+};
+
+export type DeadTimeGap = {
+  after: string;
+  before: string;
+  minutes: number;
+};
+
+export type DeadTimeAnalysis = {
+  complete: boolean;
+  totalMinutes: number | null;
+  gaps: DeadTimeGap[];
 };
 
 export type AnalysisResult = {
@@ -105,6 +119,7 @@ export type AnalysisResult = {
   stages: StageResult[];
   alerts: string[];
   suggestions: string[];
+  deadTime: DeadTimeAnalysis;
   stageDurationTotal: number | null;
   totalTime: number | null;
   monteCarlo: MonteCarloResult;
@@ -196,6 +211,8 @@ const monteCarloVariables: MonteCarloVariable[] = [
   { name: "Tiempo de decorado", variation: "variación operativa de ±11 %" },
   { name: "Tiempo de horno", variation: "variación operativa de ±11 %" },
   { name: "Traslado a empaquetado", variation: "variación logística de ±20 %" },
+  { name: "Tiempos muertos", variation: "huecos reales en los que no se ejecuta ningún proceso del lote" },
+  { name: "Procesos simultáneos", variation: "los solapamientos se descuentan para estimar el tiempo real de salida" },
   { name: "Lotes en fermentadora", variation: "cada lote representa 1 carrito; capacidad compartida de 18 puestos, solo 3 en zona ideal" },
   { name: "Liberación de posiciones", variation: "al salir un lote, el siguiente ocupa primero una posición ideal disponible" },
   { name: "Zona no ideal de fermentación", variation: "demora adicional simulada de 10 % a 25 %" },
@@ -220,6 +237,77 @@ export function calculateDuration(start: string, end: string): NumberField {
   const endValue = minuteValue(end);
   if (startValue === null || endValue === null) return null;
   return endValue >= startValue ? endValue - startValue : 24 * 60 - startValue + endValue;
+}
+
+type ProcessInterval = {
+  id: string;
+  name: string;
+  start: number;
+  end: number;
+};
+
+function relativeMinute(time: string, baseTime: string) {
+  const value = minuteValue(time);
+  const base = minuteValue(baseTime);
+  if (value === null || base === null) return null;
+  return value >= base ? value - base : 24 * 60 - base + value;
+}
+
+function processTimeline(input: ProcessInput) {
+  const definitions = [
+    ["mezclado", "Mezclado", input.horaInicioAmasado, input.horaFinAmasado, true],
+    ["picado", "Picado con reposo", input.horaInicioPicado, input.horaFinPicado, true],
+    ["sobadora", "Sobadora", input.horaInicioSobadora, input.horaFinSobadora, input.tiempoSobadora !== "no_aplica"],
+    ["porcionado", "Porcionado", input.horaInicioPorcionado, input.horaFinPorcionado, true],
+    ["laminadora", "Laminadora", input.horaInicioLaminadora, input.horaFinLaminadora, input.tiempoLaminadora !== "no_aplica"],
+    ["boleado", "Boleado", input.horaInicioBoleado, input.horaFinBoleado, true],
+    ["decorado", "Decorado", input.horaInicioDecorado, input.horaFinDecorado, input.tiempoDecorado !== "no_aplica"],
+    ["fermentacion", "Fermentación", input.horaInicioFermentacion, input.horaFinFermentacion, true],
+    ["horno", "Horno", input.horaInicioHorno, input.horaFinHorno, true],
+    ["traslado", "Traslado a empaquetado", input.horaInicioTraslado, input.horaFinTraslado, true],
+  ] as const;
+  const intervals: ProcessInterval[] = [];
+  let complete = true;
+
+  definitions.forEach(([id, name, startTime, endTime, applies]) => {
+    if (!applies) return;
+    const start = relativeMinute(startTime, input.horaInicioAmasado);
+    const duration = calculateDuration(startTime, endTime);
+    if (start === null || duration === null) {
+      complete = false;
+      return;
+    }
+    intervals.push({ id, name, start, end: start + duration });
+  });
+
+  return { complete, intervals: intervals.sort((a, b) => a.start - b.start || a.end - b.end) };
+}
+
+export function analyzeDeadTime(input: ProcessInput): DeadTimeAnalysis {
+  const timeline = processTimeline(input);
+  if (!timeline.complete || timeline.intervals.length === 0) {
+    return { complete: false, totalMinutes: null, gaps: [] };
+  }
+
+  const gaps: DeadTimeGap[] = [];
+  let activeUntil = timeline.intervals[0].end;
+  let previousProcess = timeline.intervals[0].name;
+
+  timeline.intervals.slice(1).forEach((interval) => {
+    if (interval.start > activeUntil) {
+      gaps.push({ after: previousProcess, before: interval.name, minutes: interval.start - activeUntil });
+    }
+    if (interval.end > activeUntil) {
+      activeUntil = interval.end;
+      previousProcess = interval.name;
+    }
+  });
+
+  return {
+    complete: true,
+    totalMinutes: gaps.reduce((sum, item) => sum + item.minutes, 0),
+    gaps,
+  };
 }
 
 function mixingRange(recipe: RecipeKey) {
@@ -379,6 +467,64 @@ function elapsedCompletionTime(input: ProcessInput) {
   return calculateDuration(input.horaInicioAmasado, input.horaFinTraslado);
 }
 
+function productiveTimelineMinutes(input: ProcessInput) {
+  const elapsed = elapsedCompletionTime(input);
+  const timeline = processTimeline(input);
+  if (elapsed === null || !timeline.complete) return null;
+
+  const intervals = timeline.intervals
+    .map((item) => ({ start: clamp(item.start, 0, elapsed), end: clamp(item.end, 0, elapsed) }))
+    .filter((item) => item.end > item.start);
+  if (intervals.length === 0) return 0;
+
+  let total = 0;
+  let activeStart = intervals[0].start;
+  let activeUntil = intervals[0].end;
+  intervals.slice(1).forEach((interval) => {
+    if (interval.start > activeUntil) {
+      total += activeUntil - activeStart;
+      activeStart = interval.start;
+    }
+    activeUntil = Math.max(activeUntil, interval.end);
+  });
+  return total + activeUntil - activeStart;
+}
+
+function optimalStageDuration(stageResult: StageResult) {
+  if (stageResult.value === "no_aplica") return 0;
+  if (!isNumber(stageResult.value)) return null;
+  if (stageResult.min !== undefined) return stageResult.min;
+  if (stageResult.max !== undefined) return Math.min(stageResult.value, stageResult.max);
+  return stageResult.value;
+}
+
+function monteCarloTimingContext(input: ProcessInput, stages: StageResult[]) {
+  const actualTime = elapsedCompletionTime(input);
+  const activeTime = productiveTimelineMinutes(input);
+  const deadTime = analyzeDeadTime(input);
+  const stageDurationTotal = totalProcessTime(stages);
+  const optimalDurations = stages.map(optimalStageDuration);
+  if (
+    actualTime === null ||
+    activeTime === null ||
+    deadTime.totalMinutes === null ||
+    stageDurationTotal === null ||
+    stageDurationTotal <= 0 ||
+    optimalDurations.some((value) => value === null)
+  ) {
+    return null;
+  }
+
+  const optimalStageTotal = optimalDurations.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  return {
+    actualTime,
+    activeTime,
+    deadTime: deadTime.totalMinutes,
+    stageDurationTotal,
+    optimalTime: Math.round(activeTime * (optimalStageTotal / stageDurationTotal)),
+  };
+}
+
 function simulateStages(stages: StageResult[]) {
   return measuredStages(stages).map((item) => {
     const simulatedValue = randomAround(item.value, spreadForStage(item.id));
@@ -392,17 +538,16 @@ function simulateStages(stages: StageResult[]) {
   });
 }
 
-function runMonteCarlo(stages: StageResult[]): MonteCarloResult {
+function runMonteCarlo(input: ProcessInput, stages: StageResult[]): MonteCarloResult {
   const iterations = 1200;
   const totals: number[] = [];
   const delayed: boolean[] = [];
   const frequency = new Map<string, number>();
+  const timing = monteCarloTimingContext(input, stages);
 
   for (let index = 0; index < iterations; index += 1) {
     const simulated = simulateStages(stages);
-    if (simulated.length === 0) {
-      totals.push(0);
-      delayed.push(false);
+    if (simulated.length === 0 || !timing) {
       continue;
     }
 
@@ -410,15 +555,19 @@ function runMonteCarlo(stages: StageResult[]): MonteCarloResult {
       item.simulatedPressure > winner.simulatedPressure ? item : winner,
     );
     frequency.set(bottleneck.name, (frequency.get(bottleneck.name) ?? 0) + 1);
-    totals.push(simulated.reduce((sum, item) => sum + item.simulatedValue, 0));
-    delayed.push(simulated.some((item) => item.max !== undefined && item.simulatedValue > item.max));
+    const simulatedStageTotal = simulated.reduce((sum, item) => sum + item.simulatedValue, 0);
+    const simulatedElapsed = timing.deadTime + timing.activeTime * (simulatedStageTotal / timing.stageDurationTotal);
+    totals.push(simulatedElapsed);
+    delayed.push(simulatedElapsed > timing.optimalTime * 1.1);
   }
 
   return {
     iterations,
-    p50: Math.round(percentile(totals, 0.5)),
-    p90: Math.round(percentile(totals, 0.9)),
-    delayProbability: Math.round((delayed.filter(Boolean).length / iterations) * 100),
+    actualTime: timing?.actualTime ?? null,
+    optimalTime: timing?.optimalTime ?? null,
+    p50: timing ? Math.round(percentile(totals, 0.5)) : null,
+    p90: timing ? Math.round(percentile(totals, 0.9)) : null,
+    delayProbability: timing ? Math.round((delayed.filter(Boolean).length / iterations) * 100) : null,
     bottleneckFrequency: [...frequency.entries()]
       .map(([stageName, count]) => ({ stage: stageName, probability: Math.round((count / iterations) * 100) }))
       .sort((a, b) => b.probability - a.probability)
@@ -687,7 +836,8 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
     suggestions,
     stageDurationTotal: totalProcessTime(stages),
     totalTime: elapsedCompletionTime(input),
-    monteCarlo: runMonteCarlo(stages),
+    deadTime: analyzeDeadTime(input),
+    monteCarlo: runMonteCarlo(input, stages),
   };
 }
 
@@ -799,6 +949,15 @@ function fermentationSchedule(
   };
 }
 
+function groupCycleTime(inputs: ProcessInput[], lotTimes: Array<number | null>) {
+  const starts = inputs.map((input) => minuteValue(input.horaInicioAmasado));
+  if (starts.some((value) => value === null) || lotTimes.some((value) => value === null) || starts.length === 0) return null;
+  const validStarts = starts as number[];
+  const validLotTimes = lotTimes as number[];
+  const earliestStart = Math.min(...validStarts);
+  return Math.max(...validStarts.map((start, index) => start - earliestStart + validLotTimes[index]));
+}
+
 export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
   const selected = inputs.slice(0, 30);
   const analyses = selected.map((item) => analyzeProcess(item));
@@ -854,10 +1013,24 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
   const totals: number[] = [];
   const delays: boolean[] = [];
   const simulatedBottlenecks = new Map<string, number>();
+  const timingContexts = selected.map((input, index) => monteCarloTimingContext(input, analyses[index].stages));
+  const actualGroupTime = groupCycleTime(selected, analyses.map((analysis) => analysis.totalTime));
+  const optimalGroupTime = groupCycleTime(selected, timingContexts.map((timing) => timing?.optimalTime ?? null));
 
   for (let index = 0; index < iterations; index += 1) {
+    const simulatedTimings: Array<number | null> = [];
+    const simulatedStageSets: ReturnType<typeof simulateStages>[] = [];
     const simulatedLots = selected.flatMap((input, lotIndex) => {
       const simulated = simulateStages(analyses[lotIndex].stages);
+      simulatedStageSets.push(simulated);
+      const timing = timingContexts[lotIndex];
+      simulatedTimings.push(
+        timing
+          ? timing.deadTime +
+              timing.activeTime *
+                (simulated.reduce((sum, item) => sum + item.simulatedValue, 0) / timing.stageDurationTotal)
+          : null,
+      );
       const parts = lotParts(
         simulated.map((item) => ({
           ...item,
@@ -877,19 +1050,23 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
             lotsAtOverFermentationRisk: 0,
             maxOvenWait: 0,
             waitingOccurred: false,
-          };
+        };
 
-    totals.push(schedule.cycleTime);
+    const simulatedGroupTime = groupCycleTime(selected, simulatedTimings);
+    if (simulatedGroupTime === null || optimalGroupTime === null) continue;
+    totals.push(simulatedGroupTime);
     const hasFermentationDelay =
       schedule.lotsOutsideIdealZone > 0 || schedule.waitingOccurred || schedule.lotsAtOverFermentationRisk > 0;
-    delays.push(hasFermentationDelay);
+    delays.push(simulatedGroupTime > optimalGroupTime * 1.1 || hasFermentationDelay);
     if (hasFermentationDelay) {
       simulatedBottlenecks.set("Fermentación compartida", (simulatedBottlenecks.get("Fermentación compartida") ?? 0) + 1);
     } else {
-      const principal = analyses.reduce((winner, analysis) =>
-        analysis.bottleneck.pressure > winner.bottleneck.pressure ? analysis : winner,
+      const measured = simulatedStageSets.flat();
+      if (measured.length === 0) continue;
+      const principal = measured.reduce((winner, item) =>
+        item.simulatedPressure > winner.simulatedPressure ? item : winner,
       );
-      simulatedBottlenecks.set(principal.bottleneck.name, (simulatedBottlenecks.get(principal.bottleneck.name) ?? 0) + 1);
+      simulatedBottlenecks.set(principal.name, (simulatedBottlenecks.get(principal.name) ?? 0) + 1);
     }
   }
 
@@ -910,9 +1087,11 @@ export function analyzeGroup(inputs: ProcessInput[]): GroupAnalysisResult {
       .sort((a, b) => b.lots - a.lots),
     monteCarlo: {
       iterations,
-      p50: Math.round(percentile(totals, 0.5)),
-      p90: Math.round(percentile(totals, 0.9)),
-      delayProbability: Math.round((delays.filter(Boolean).length / iterations) * 100),
+      actualTime: actualGroupTime,
+      optimalTime: optimalGroupTime,
+      p50: totals.length > 0 ? Math.round(percentile(totals, 0.5)) : null,
+      p90: totals.length > 0 ? Math.round(percentile(totals, 0.9)) : null,
+      delayProbability: totals.length > 0 ? Math.round((delays.filter(Boolean).length / totals.length) * 100) : null,
       bottleneckFrequency: [...simulatedBottlenecks.entries()]
         .map(([stageName, count]) => ({
           stage: stageName,

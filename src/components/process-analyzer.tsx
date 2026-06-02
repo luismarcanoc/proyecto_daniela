@@ -199,6 +199,8 @@ function exportExcel(history: SavedAnalysis[]) {
     "Cuello individual",
     "Suma duraciones evaluadas",
     "Tiempo transcurrido hasta empaquetado",
+    "Tiempo muerto total",
+    "Tiempo óptimo Monte Carlo",
     "P50 Monte Carlo",
     "P90 Monte Carlo",
     "Riesgo atraso",
@@ -261,9 +263,11 @@ function exportExcel(history: SavedAnalysis[]) {
     item.result.bottleneck.name,
     item.result.stageDurationTotal,
     item.result.totalTime,
+    item.result.deadTime.totalMinutes,
+    item.result.monteCarlo.optimalTime,
     item.result.monteCarlo.p50,
     item.result.monteCarlo.p90,
-    `${item.result.monteCarlo.delayProbability}%`,
+    item.result.monteCarlo.delayProbability === null ? "" : `${item.result.monteCarlo.delayProbability}%`,
     item.result.alerts.join(" | "),
     item.result.suggestions.join(" | "),
     item.wasteReported ? "Sí" : "No",
@@ -430,6 +434,14 @@ function stageRangeLabel(item: StageResult) {
 
 function stageValueLabel(value: StageResult["value"]) {
   return value === "no_aplica" ? "No aplica" : value ?? "Pendiente";
+}
+
+function minuteMetric(value: number | null) {
+  return value === null ? "Pendiente" : `${value} min`;
+}
+
+function percentageMetric(value: number | null) {
+  return value === null ? "Pendiente" : `${value}%`;
 }
 
 function wasteBreakdown(items: SavedAnalysis[]) {
@@ -988,6 +1000,30 @@ export function ProcessAnalyzer() {
               ))}
             </ul>
           </section>
+
+          <section className="panel">
+            <div className="section-title compact">
+              <h2>Tiempos de espera / tiempos muertos</h2>
+            </div>
+            {!result.deadTime.complete ? (
+              <p className="empty">Complete las horas de los procesos para identificar tiempos muertos.</p>
+            ) : result.deadTime.gaps.length === 0 ? (
+              <p className="empty">No se detectaron minutos sin procesos activos.</p>
+            ) : (
+              <>
+                <p className="dead-time-total">
+                  Total sin procesos activos: <strong>{result.deadTime.totalMinutes} min</strong>
+                </p>
+                <ul className="message-list wait-list">
+                  {result.deadTime.gaps.map((gap, index) => (
+                    <li key={`${gap.after}-${gap.before}-${index}`}>
+                      {gap.minutes} min entre {gap.after} y {gap.before}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
         </aside>
       </section>
 
@@ -1019,20 +1055,28 @@ export function ProcessAnalyzer() {
 
         <div className="panel monte-panel">
           <div className="section-title compact">
-            <h2>Monte Carlo individual por duraciones</h2>
+            <h2>Monte Carlo individual de salida del lote</h2>
           </div>
           <div className="mc-grid">
             <div>
-              <span>P50 ciclo</span>
-              <strong>{result.monteCarlo.p50} min</strong>
+              <span>Tiempo real</span>
+              <strong>{minuteMetric(result.monteCarlo.actualTime)}</strong>
             </div>
             <div>
-              <span>P90 ciclo</span>
-              <strong>{result.monteCarlo.p90} min</strong>
+              <span>Óptimo posible</span>
+              <strong>{minuteMetric(result.monteCarlo.optimalTime)}</strong>
             </div>
             <div>
-              <span>Riesgo de atraso</span>
-              <strong>{result.monteCarlo.delayProbability}%</strong>
+              <span>P50 salida</span>
+              <strong>{minuteMetric(result.monteCarlo.p50)}</strong>
+            </div>
+            <div>
+              <span>P90 salida</span>
+              <strong>{minuteMetric(result.monteCarlo.p90)}</strong>
+            </div>
+            <div>
+              <span>Riesgo sobre óptimo +10%</span>
+              <strong>{percentageMetric(result.monteCarlo.delayProbability)}</strong>
             </div>
           </div>
           <div className="frequency-list">
@@ -1137,16 +1181,24 @@ export function ProcessAnalyzer() {
               <p className="eyebrow">Monte Carlo grupal</p>
               <div className="mc-grid">
                 <div>
-                  <span>P50 conjunto</span>
-                  <strong>{groupResult.monteCarlo.p50} min</strong>
+                  <span>Tiempo real conjunto</span>
+                  <strong>{minuteMetric(groupResult.monteCarlo.actualTime)}</strong>
                 </div>
                 <div>
-                  <span>P90 conjunto</span>
-                  <strong>{groupResult.monteCarlo.p90} min</strong>
+                  <span>Óptimo posible</span>
+                  <strong>{minuteMetric(groupResult.monteCarlo.optimalTime)}</strong>
                 </div>
                 <div>
-                  <span>Riesgo conjunto</span>
-                  <strong>{groupResult.monteCarlo.delayProbability}%</strong>
+                  <span>P50 salida conjunto</span>
+                  <strong>{minuteMetric(groupResult.monteCarlo.p50)}</strong>
+                </div>
+                <div>
+                  <span>P90 salida conjunto</span>
+                  <strong>{minuteMetric(groupResult.monteCarlo.p90)}</strong>
+                </div>
+                <div>
+                  <span>Riesgo sobre óptimo +10%</span>
+                  <strong>{percentageMetric(groupResult.monteCarlo.delayProbability)}</strong>
                 </div>
               </div>
               <div className="frequency-list">
