@@ -156,6 +156,12 @@ const premixRanges: Record<RecipeKey, { min: number; max: number }> = {
   premezcla_8: { min: 1515, max: 1520 },
 };
 
+const spongeRanges: Record<RecipeKey, { min: number; max: number }> = {
+  premezcla_4: { min: 1390, max: 1395 },
+  premezcla_6: { min: 2080, max: 2085 },
+  premezcla_8: { min: 2770, max: 2775 },
+};
+
 const fermentationRanges: Record<ProductKey, { min: number; max: number }> = {
   hamburguesa_tradicional: { min: 150, max: 150 },
   hamburguesa_brioche: { min: 90, max: 90 },
@@ -519,6 +525,7 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
   const suggestions: string[] = [];
   const productName = products[input.producto];
   const premix = premixRanges[input.receta];
+  const sponge = spongeRanges[input.receta];
   const ovenTemp = ovenTemperatureRange(input.producto, input.horno);
   const effectiveLaminadora = laminadoraAplica(input.producto) ? input.tiempoLaminadora : "no_aplica";
 
@@ -547,6 +554,10 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
   if (isNumber(input.pesoPremezcla) && (input.pesoPremezcla < premix.min || input.pesoPremezcla > premix.max)) {
     pushUnique(alerts, `El peso de ${recipes[input.receta]} debe estar entre ${premix.min} g y ${premix.max} g.`);
     pushUnique(suggestions, "Corrija el peso de pre-mezcla antes de atribuir el desvío a la operación del personal.");
+  }
+  if (isNumber(input.pesoEsponja) && (input.pesoEsponja < sponge.min || input.pesoEsponja > sponge.max)) {
+    pushUnique(alerts, `El peso de esponja para ${recipes[input.receta]} debe estar entre ${sponge.min} g y ${sponge.max} g.`);
+    pushUnique(suggestions, "Corrija el peso de esponja antes de continuar con el lote.");
   }
 
   const stages = [
