@@ -32,19 +32,41 @@ export type ProcessInput = {
   temperaturaArea: NumberField;
   humedadRelativa: NumberField;
   horaInicioAmasado: string;
+  horaFinAmasado: string;
   receta: RecipeKey;
   pesoPremezcla: NumberField;
   tiempoMezclado: NumberField;
   agregado: WaterMode;
   temperaturaMasa: NumberField;
+  horaInicioPicado: string;
+  horaFinPicado: string;
   tiempoPicado: NumberField;
+  horaInicioLaminadora: string;
+  horaFinLaminadora: string;
   tiempoLaminadora: OptionalProcessTime;
+  horaInicioSobadora: string;
+  horaFinSobadora: string;
   tiempoSobadora: OptionalProcessTime;
+  horaInicioPorcionado: string;
+  horaFinPorcionado: string;
   tiempoPorcionado: NumberField;
+  horaInicioBoleado: string;
+  horaFinBoleado: string;
   tiempoBoleado: NumberField;
+  horaInicioFermentacion: string;
+  horaFinFermentacion: string;
   tiempoFermentacion: NumberField;
+  temperaturaFermentadora: NumberField;
+  humedadFermentadora: NumberField;
+  horaInicioDecorado: string;
+  horaFinDecorado: string;
+  tiempoDecorado: NumberField;
+  horaInicioHorno: string;
+  horaFinHorno: string;
   tiempoHorno: NumberField;
   temperaturaHorno: NumberField;
+  horaInicioTraslado: string;
+  horaFinTraslado: string;
   tiempoTraslado: NumberField;
   operariosBoleado: NumberField;
   equiposDanados: EquipmentKey[];
@@ -161,6 +183,9 @@ const monteCarloVariables: MonteCarloVariable[] = [
   { name: "Tiempo de porcionado", variation: "variación operativa de ±11 %" },
   { name: "Tiempo de boleado", variation: "variación operativa de ±11 %" },
   { name: "Tiempo de fermentación", variation: "variación térmica de ±6 %" },
+  { name: "Temperatura de fermentadora", variation: "condición ambiental registrada para contextualizar la fermentación" },
+  { name: "Humedad de fermentadora", variation: "condición ambiental registrada para contextualizar la fermentación" },
+  { name: "Tiempo de decorado", variation: "variación operativa de ±11 %" },
   { name: "Tiempo de horno", variation: "variación operativa de ±11 %" },
   { name: "Traslado a empaquetado", variation: "variación logística de ±20 %" },
   { name: "Lotes en fermentadora", variation: "cada lote representa 1 carrito; capacidad compartida de 18 puestos, solo 3 en zona ideal" },
@@ -171,6 +196,22 @@ const monteCarloVariables: MonteCarloVariable[] = [
 
 function isNumber(value: OptionalProcessTime | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function minuteValue(time: string) {
+  const [hours, minutes] = time.split(":").map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+  return hours * 60 + minutes;
+}
+
+export function calculateDuration(start: string, end: string): NumberField {
+  if (!start || !end) return null;
+  const startValue = minuteValue(start);
+  const endValue = minuteValue(end);
+  if (startValue === null || endValue === null) return null;
+  return endValue >= startValue ? endValue - startValue : 24 * 60 - startValue + endValue;
 }
 
 function mixingRange(recipe: RecipeKey) {
@@ -386,6 +427,9 @@ function missingAlerts(input: ProcessInput, alerts: string[]) {
     ["tiempoPorcionado", "tiempo de porcionado"],
     ["tiempoBoleado", "tiempo de boleado"],
     ["tiempoFermentacion", "tiempo de fermentación"],
+    ["temperaturaFermentadora", "temperatura de fermentadora"],
+    ["humedadFermentadora", "humedad de fermentadora"],
+    ["tiempoDecorado", "tiempo de decorado"],
     ["tiempoHorno", "tiempo de horno"],
     ["temperaturaHorno", "temperatura de horno"],
     ["tiempoTraslado", "tiempo de traslado"],
@@ -416,6 +460,9 @@ function operationalLimitAlerts(input: ProcessInput, alerts: string[]) {
     [laminadoraAplica(input.producto) ? input.tiempoLaminadora : "no_aplica", "tiempo de laminadora"],
     [input.tiempoBoleado, "tiempo de boleado"],
     [input.tiempoFermentacion, "tiempo de fermentación"],
+    [input.temperaturaFermentadora, "temperatura de fermentadora"],
+    [input.humedadFermentadora, "humedad de fermentadora"],
+    [input.tiempoDecorado, "tiempo de decorado"],
     [input.tiempoHorno, "tiempo de horno"],
     [input.tiempoTraslado, "tiempo de traslado"],
   ];
@@ -547,6 +594,7 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
       `${isNumber(input.operariosBoleado) ? input.operariosBoleado : "Sin dato de"} operarios reportados.`,
       equipmentPressure(input, "boleado"),
     ),
+    stage("decorado", "Decorado", input.tiempoDecorado, {}, "min", "Tiempo registrado sin rango operativo configurado."),
     stage("fermentacion", "Fermentación", input.tiempoFermentacion, fermentationRanges[input.producto], "min", productName),
     stage(
       "horno",
@@ -584,6 +632,7 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
     if (item.id === "laminadora") pushUnique(suggestions, "Revise la carga o disponibilidad de laminadora; su tiempo está retrasando el formado del producto.");
     if (item.id === "boleado") pushUnique(suggestions, "Reasigne apoyo a boleado hasta recuperar un tiempo menor o igual a 15 min.");
     if (item.id === "fermentacion") pushUnique(suggestions, "Ajuste la secuencia del lote alrededor de fermentación; mover personal no corrige por sí solo ese tiempo.");
+    if (item.id === "decorado") pushUnique(suggestions, "Revise la secuencia de decorado antes de liberar el lote hacia horno.");
     if (item.id === "horno") pushUnique(suggestions, "Proteja la disponibilidad del horno seleccionado y evite que fermentación libere más producto del que puede cocerse.");
     if (item.id === "traslado") pushUnique(suggestions, "Coordine el traslado al salir del horno para no superar 5 min hacia empaquetado.");
   });
@@ -621,8 +670,7 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
 }
 
 function startMinute(time: string) {
-  const [hours, minutes] = time.split(":").map(Number);
-  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : 0;
+  return minuteValue(time) ?? 0;
 }
 
 function stageValue(stages: StageResult[], id: string, noAplicaAsZero = false) {
@@ -639,6 +687,7 @@ function lotParts(stages: StageResult[]) {
     stageValue(stages, "porcionado"),
     stageValue(stages, "laminadora", true),
     stageValue(stages, "boleado"),
+    stageValue(stages, "decorado"),
   ];
   const oven = stageValue(stages, "horno");
   const transfer = stageValue(stages, "traslado");
@@ -867,19 +916,41 @@ export function defaultInput(): ProcessInput {
     temperaturaArea: null,
     humedadRelativa: null,
     horaInicioAmasado: "07:00",
+    horaFinAmasado: "",
     receta: "premezcla_6",
     pesoPremezcla: null,
     tiempoMezclado: null,
     agregado: "agua",
     temperaturaMasa: null,
+    horaInicioPicado: "",
+    horaFinPicado: "",
     tiempoPicado: null,
+    horaInicioLaminadora: "",
+    horaFinLaminadora: "",
     tiempoLaminadora: null,
+    horaInicioSobadora: "",
+    horaFinSobadora: "",
     tiempoSobadora: null,
+    horaInicioPorcionado: "",
+    horaFinPorcionado: "",
     tiempoPorcionado: null,
+    horaInicioBoleado: "",
+    horaFinBoleado: "",
     tiempoBoleado: null,
+    horaInicioFermentacion: "",
+    horaFinFermentacion: "",
     tiempoFermentacion: null,
+    temperaturaFermentadora: null,
+    humedadFermentadora: null,
+    horaInicioDecorado: "",
+    horaFinDecorado: "",
+    tiempoDecorado: null,
+    horaInicioHorno: "",
+    horaFinHorno: "",
     tiempoHorno: null,
     temperaturaHorno: null,
+    horaInicioTraslado: "",
+    horaFinTraslado: "",
     tiempoTraslado: null,
     operariosBoleado: null,
     equiposDanados: [],
@@ -888,11 +959,37 @@ export function defaultInput(): ProcessInput {
 
 export function normalizeInput(input: Partial<ProcessInput>): ProcessInput {
   const fallback = defaultInput();
-  return {
+  const normalized = {
     ...fallback,
     ...input,
     horno: input.horno ?? fallback.horno,
     equiposDanados: input.equiposDanados ?? [],
+  };
+  const calculatedValue = (start: string, end: string, saved: NumberField) =>
+    start && end ? calculateDuration(start, end) : saved;
+  const optionalCalculatedValue = (start: string, end: string, saved: OptionalProcessTime) =>
+    saved === "no_aplica" ? saved : calculatedValue(start, end, saved);
+
+  return {
+    ...normalized,
+    tiempoMezclado: calculatedValue(normalized.horaInicioAmasado, normalized.horaFinAmasado, normalized.tiempoMezclado),
+    tiempoPicado: calculatedValue(normalized.horaInicioPicado, normalized.horaFinPicado, normalized.tiempoPicado),
+    tiempoLaminadora: optionalCalculatedValue(
+      normalized.horaInicioLaminadora,
+      normalized.horaFinLaminadora,
+      normalized.tiempoLaminadora,
+    ),
+    tiempoSobadora: optionalCalculatedValue(normalized.horaInicioSobadora, normalized.horaFinSobadora, normalized.tiempoSobadora),
+    tiempoPorcionado: calculatedValue(normalized.horaInicioPorcionado, normalized.horaFinPorcionado, normalized.tiempoPorcionado),
+    tiempoBoleado: calculatedValue(normalized.horaInicioBoleado, normalized.horaFinBoleado, normalized.tiempoBoleado),
+    tiempoFermentacion: calculatedValue(
+      normalized.horaInicioFermentacion,
+      normalized.horaFinFermentacion,
+      normalized.tiempoFermentacion,
+    ),
+    tiempoDecorado: calculatedValue(normalized.horaInicioDecorado, normalized.horaFinDecorado, normalized.tiempoDecorado),
+    tiempoHorno: calculatedValue(normalized.horaInicioHorno, normalized.horaFinHorno, normalized.tiempoHorno),
+    tiempoTraslado: calculatedValue(normalized.horaInicioTraslado, normalized.horaFinTraslado, normalized.tiempoTraslado),
   };
 }
 
@@ -908,6 +1005,9 @@ export function isProcessComplete(input: ProcessInput) {
     input.tiempoPorcionado,
     input.tiempoBoleado,
     input.tiempoFermentacion,
+    input.temperaturaFermentadora,
+    input.humedadFermentadora,
+    input.tiempoDecorado,
     input.tiempoHorno,
     input.temperaturaHorno,
     input.tiempoTraslado,

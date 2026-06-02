@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   analyzeGroup,
   analyzeProcess,
+  calculateDuration,
   defaultInput,
   equipmentOptions,
   isProcessComplete,
@@ -50,6 +51,7 @@ type SavedAnalysis = {
   createdAt: string;
   wasteReported: boolean;
   wasteReasons: WasteReasonKey[];
+  wasteKg: Partial<Record<WasteReasonKey, number>>;
 };
 
 const storageKey = "proyecto-daniela-analisis";
@@ -132,16 +134,6 @@ const wasteReasons: Record<WasteReasonKey, { label: string; description: string 
   },
 };
 const pieColors = ["#1c7c65", "#bd7b18", "#b73535", "#3179a8", "#70529b", "#489870", "#c05d43", "#67736e"];
-const numberFields = [
-  ["tiempoMezclado", "Mezclado"],
-  ["tiempoPicado", "Picado"],
-  ["tiempoPorcionado", "Porcionado"],
-  ["tiempoBoleado", "Boleado"],
-  ["tiempoFermentacion", "Fermentación"],
-  ["tiempoHorno", "Horno"],
-  ["tiempoTraslado", "Traslado"],
-] as const;
-
 function numberValue(value: string): NumberField {
   if (value.trim() === "") return null;
   const parsed = Number(value);
@@ -163,22 +155,44 @@ function exportExcel(history: SavedAnalysis[]) {
     "Receta",
     "Agregado (agua/hielo)",
     "Amasadora",
-    "Inicio amasado",
+    "Inicio mezclado",
+    "Fin mezclado",
+    "Tiempo mezclado",
     "Horno",
     "Temperatura área",
     "Humedad relativa",
     "Peso pre-mezcla",
     "Operarios boleando",
     "Temperatura masa",
-    "Tiempo mezclado",
+    "Inicio picado",
+    "Fin picado",
     "Tiempo picado",
+    "Inicio sobadora",
+    "Fin sobadora",
     "Tiempo sobadora",
+    "Inicio porcionado",
+    "Fin porcionado",
     "Tiempo porcionado",
+    "Inicio laminadora",
+    "Fin laminadora",
     "Tiempo laminadora",
+    "Inicio boleado",
+    "Fin boleado",
     "Tiempo boleado",
+    "Inicio decorado",
+    "Fin decorado",
+    "Tiempo decorado",
+    "Inicio fermentación",
+    "Fin fermentación",
     "Tiempo fermentación",
+    "Temperatura fermentadora",
+    "Humedad fermentadora",
+    "Inicio horno",
+    "Fin horno",
     "Tiempo horno",
     "Temperatura horno",
+    "Inicio traslado",
+    "Fin traslado",
     "Tiempo traslado",
     "Equipos dañados",
     "Cuello individual",
@@ -190,6 +204,8 @@ function exportExcel(history: SavedAnalysis[]) {
     "Sugerencias",
     "Tuvo merma",
     "Motivos de merma",
+    "Kg perdidos por tipo",
+    "Kg perdidos totales",
   ];
 
   const rows = history.map((item) => [
@@ -200,21 +216,43 @@ function exportExcel(history: SavedAnalysis[]) {
     item.input.agregado === "agua" ? "Agua" : "Hielo",
     item.input.amasadora,
     item.input.horaInicioAmasado,
+    item.input.horaFinAmasado,
+    item.input.tiempoMezclado,
     item.input.horno,
     item.input.temperaturaArea,
     item.input.humedadRelativa,
     item.input.pesoPremezcla,
     item.input.operariosBoleado,
     item.input.temperaturaMasa,
-    item.input.tiempoMezclado,
+    item.input.horaInicioPicado,
+    item.input.horaFinPicado,
     item.input.tiempoPicado,
+    item.input.horaInicioSobadora,
+    item.input.horaFinSobadora,
     item.input.tiempoSobadora === "no_aplica" ? "No aplica" : item.input.tiempoSobadora,
+    item.input.horaInicioPorcionado,
+    item.input.horaFinPorcionado,
     item.input.tiempoPorcionado,
+    item.input.horaInicioLaminadora,
+    item.input.horaFinLaminadora,
     item.input.tiempoLaminadora === "no_aplica" ? "No aplica" : item.input.tiempoLaminadora,
+    item.input.horaInicioBoleado,
+    item.input.horaFinBoleado,
     item.input.tiempoBoleado,
+    item.input.horaInicioDecorado,
+    item.input.horaFinDecorado,
+    item.input.tiempoDecorado,
+    item.input.horaInicioFermentacion,
+    item.input.horaFinFermentacion,
     item.input.tiempoFermentacion,
+    item.input.temperaturaFermentadora,
+    item.input.humedadFermentadora,
+    item.input.horaInicioHorno,
+    item.input.horaFinHorno,
     item.input.tiempoHorno,
     item.input.temperaturaHorno,
+    item.input.horaInicioTraslado,
+    item.input.horaFinTraslado,
     item.input.tiempoTraslado,
     item.input.equiposDanados.map((key) => equipmentOptions[key]).join(", "),
     item.result.bottleneck.name,
@@ -226,6 +264,8 @@ function exportExcel(history: SavedAnalysis[]) {
     item.result.suggestions.join(" | "),
     item.wasteReported ? "Sí" : "No",
     item.wasteReasons.map((key) => wasteReasons[key].label).join(", "),
+    item.wasteReasons.map((key) => `${wasteReasons[key].label}: ${item.wasteKg[key] ?? 0} kg`).join(" | "),
+    item.wasteReasons.reduce((sum, key) => sum + (item.wasteKg[key] ?? 0), 0),
   ]);
 
   const sheetRows = [columns, ...rows]
@@ -275,12 +315,14 @@ function NumberInput({
   min = 0,
   max = 1000,
   integer = false,
+  disabled = false,
 }: {
   value: NumberField;
   onChange: (value: NumberField) => void;
   min?: number;
   max?: number | null;
   integer?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <input
@@ -288,6 +330,7 @@ function NumberInput({
       min={min}
       max={max ?? undefined}
       step={integer ? 1 : "any"}
+      disabled={disabled}
       value={value ?? ""}
       onChange={(event) => {
         const parsed = numberValue(event.target.value);
@@ -301,13 +344,43 @@ function NumberInput({
   );
 }
 
-function OptionalTimeInput({
+function TimeRangeInput({
+  start,
+  end,
   value,
-  onChange,
+  onStartChange,
+  onEndChange,
+}: {
+  start: string;
+  end: string;
+  value: NumberField;
+  onStartChange: (value: string) => void;
+  onEndChange: (value: string) => void;
+}) {
+  return (
+    <div className="time-range">
+      <input aria-label="Hora de inicio" type="time" value={start} onChange={(event) => onStartChange(event.target.value)} />
+      <input aria-label="Hora final" type="time" value={end} onChange={(event) => onEndChange(event.target.value)} />
+      <strong>{value === null ? "Pendiente" : `${value} min`}</strong>
+    </div>
+  );
+}
+
+function OptionalTimeInput({
+  start,
+  end,
+  value,
+  onModeChange,
+  onStartChange,
+  onEndChange,
   disabled = false,
 }: {
+  start: string;
+  end: string;
   value: OptionalProcessTime;
-  onChange: (value: OptionalProcessTime) => void;
+  onModeChange: (value: OptionalProcessTime) => void;
+  onStartChange: (value: string) => void;
+  onEndChange: (value: string) => void;
   disabled?: boolean;
 }) {
   const mode = disabled || value === "no_aplica" ? "no_aplica" : "tiempo";
@@ -317,13 +390,19 @@ function OptionalTimeInput({
       <select
         value={mode}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value === "no_aplica" ? "no_aplica" : null)}
+        onChange={(event) => onModeChange(event.target.value === "no_aplica" ? "no_aplica" : null)}
       >
         <option value="tiempo">Registrar minutos</option>
         <option value="no_aplica">No aplica</option>
       </select>
       {mode === "tiempo" ? (
-        <NumberInput value={value as NumberField} onChange={onChange} />
+        <TimeRangeInput
+          start={start}
+          end={end}
+          value={value as NumberField}
+          onStartChange={onStartChange}
+          onEndChange={onEndChange}
+        />
       ) : (
         <span className="na-value">No aplica</span>
       )}
@@ -350,7 +429,9 @@ function wasteBreakdown(items: SavedAnalysis[]) {
   const count = new Map<WasteReasonKey, number>();
   items
     .filter((item) => item.wasteReported && isProcessComplete(item.input))
-    .forEach((item) => item.wasteReasons.forEach((reason) => count.set(reason, (count.get(reason) ?? 0) + 1)));
+    .forEach((item) =>
+      item.wasteReasons.forEach((reason) => count.set(reason, (count.get(reason) ?? 0) + (item.wasteKg[reason] ?? 0))),
+    );
 
   return [...count.entries()].map(([reason, value]) => ({
     label: wasteReasons[reason].label,
@@ -371,16 +452,16 @@ function PieChart({
   subtitle: string;
   data: Array<{ label: string; value: number }>;
 }) {
-  const totalProblems = data.reduce((sum, item) => sum + item.value, 0);
+  const totalKg = data.reduce((sum, item) => sum + item.value, 0);
   const totalCauses = data.length;
   let angle = 0;
   const gradient =
-    totalProblems === 0
+    totalKg === 0
       ? "#ebe2d6"
       : `conic-gradient(${data
           .map((item, index) => {
             const start = angle;
-            angle += (item.value / totalProblems) * 360;
+            angle += (item.value / totalKg) * 360;
             return `${pieColors[index % pieColors.length]} ${start}deg ${angle}deg`;
           })
           .join(", ")})`;
@@ -396,13 +477,13 @@ function PieChart({
           className="pie-chart"
           style={{ background: gradient }}
           role="img"
-          aria-label={`${title}: ${totalCauses} causas distintas y ${totalProblems} problemas registrados`}
+          aria-label={`${title}: ${totalCauses} causas distintas y ${totalKg} kg perdidos registrados`}
         >
-          <strong>{totalCauses}</strong>
-          <span>causas</span>
+          <strong>{totalKg}</strong>
+          <span>kg perdidos</span>
         </div>
-        {totalProblems === 0 ? (
-          <p className="empty">No hay motivos de merma registrados para esta selección.</p>
+        {totalKg === 0 ? (
+          <p className="empty">No hay kg de merma registrados para esta selección.</p>
         ) : (
           <div className="pie-legend">
             {data.map((item, index) => (
@@ -410,7 +491,7 @@ function PieChart({
                 <span style={{ background: pieColors[index % pieColors.length] }} />
                 <p>{item.label}</p>
                 <strong>
-                  {item.value} {item.value === 1 ? "problema" : "problemas"} · {Math.round((item.value / totalProblems) * 100)}%
+                  {item.value} kg · {Math.round((item.value / totalKg) * 100)}%
                 </strong>
               </div>
             ))}
@@ -464,6 +545,7 @@ export function ProcessAnalyzer() {
           createdAt: item.createdAt ?? new Date().toISOString(),
           wasteReported: item.wasteReported ?? false,
           wasteReasons: Array.isArray(item.wasteReasons) ? item.wasteReasons.filter(isWasteReasonKey) : [],
+          wasteKg: item.wasteKg ?? {},
         };
       }),
     );
@@ -482,12 +564,41 @@ export function ProcessAnalyzer() {
 
   useEffect(() => {
     if (!laminadoraAplica(input.producto) && input.tiempoLaminadora !== "no_aplica") {
-      setInput((current) => ({ ...current, tiempoLaminadora: "no_aplica" }));
+      setInput((current) => ({ ...current, horaInicioLaminadora: "", horaFinLaminadora: "", tiempoLaminadora: "no_aplica" }));
     }
   }, [input.producto, input.tiempoLaminadora]);
 
   function update<K extends keyof ProcessInput>(key: K, value: ProcessInput[K]) {
     setInput((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateProcessTime(
+    durationKey: keyof ProcessInput,
+    startKey: keyof ProcessInput,
+    endKey: keyof ProcessInput,
+    part: "start" | "end",
+    value: string,
+  ) {
+    setInput((current) => {
+      const start = part === "start" ? value : (current[startKey] as string);
+      const end = part === "end" ? value : (current[endKey] as string);
+      return { ...current, [startKey]: start, [endKey]: end, [durationKey]: calculateDuration(start, end) };
+    });
+  }
+
+  function updateOptionalProcessMode(
+    durationKey: keyof ProcessInput,
+    startKey: keyof ProcessInput,
+    endKey: keyof ProcessInput,
+    value: OptionalProcessTime,
+  ) {
+    setInput((current) => ({
+      ...current,
+      [startKey]: value === "no_aplica" ? "" : current[startKey],
+      [endKey]: value === "no_aplica" ? "" : current[endKey],
+      [durationKey]:
+        value === "no_aplica" ? "no_aplica" : calculateDuration(current[startKey] as string, current[endKey] as string),
+    }));
   }
 
   function toggleEquipment(key: EquipmentKey) {
@@ -523,15 +634,23 @@ export function ProcessAnalyzer() {
   }
 
   function saveAnalysis() {
-    const item: SavedAnalysis = {
-      id: crypto.randomUUID(),
-      input,
-      result,
-      createdAt: new Date().toISOString(),
-      wasteReported: false,
-      wasteReasons: [],
-    };
-    setHistory((current) => [item, ...current].slice(0, 100));
+    const existing = history.find((item) => item.input.fecha === input.fecha && item.input.lote.trim() === input.lote.trim());
+    const item: SavedAnalysis = existing
+      ? { ...existing, input, result }
+      : {
+          id: crypto.randomUUID(),
+          input,
+          result,
+          createdAt: new Date().toISOString(),
+          wasteReported: false,
+          wasteReasons: [],
+          wasteKg: {},
+        };
+    setHistory((current) =>
+      existing
+        ? current.map((saved) => (saved.id === existing.id ? item : saved))
+        : [item, ...current].slice(0, 100),
+    );
     setWasteLotId(item.id);
   }
 
@@ -552,6 +671,7 @@ export function ProcessAnalyzer() {
               ...item,
               wasteReported: reported,
               wasteReasons: reported ? item.wasteReasons : [],
+              wasteKg: reported ? item.wasteKg : {},
             }
           : item,
       ),
@@ -570,8 +690,24 @@ export function ProcessAnalyzer() {
         const selected = item.wasteReasons.includes(reason)
           ? item.wasteReasons.filter((itemReason) => itemReason !== reason)
           : [...item.wasteReasons, reason];
-        return { ...item, wasteReported: selected.length > 0 || item.wasteReported, wasteReasons: selected };
+        const wasteKg = { ...item.wasteKg };
+        if (!selected.includes(reason)) delete wasteKg[reason];
+        return { ...item, wasteReported: selected.length > 0 || item.wasteReported, wasteReasons: selected, wasteKg };
       }),
+    );
+  }
+
+  function updateWasteKg(reason: WasteReasonKey, value: NumberField) {
+    if (!wasteLot || !wasteLotIsComplete) return;
+    setHistory((current) =>
+      current.map((item) =>
+        item.id === wasteLot.id
+          ? {
+              ...item,
+              wasteKg: { ...item.wasteKg, [reason]: value ?? 0 },
+            }
+          : item,
+      ),
     );
   }
 
@@ -596,7 +732,7 @@ export function ProcessAnalyzer() {
         <form className="panel form-panel">
           <div className="section-title">
             <h2>Datos del lote</h2>
-            <p>Los valores numéricos se ingresan manualmente para cada análisis.</p>
+            <p>Ingrese inicio y fin de cada proceso; los minutos se calculan automáticamente.</p>
           </div>
 
           <div className="form-grid">
@@ -615,6 +751,13 @@ export function ProcessAnalyzer() {
                 ))}
               </select>
             </Field>
+          </div>
+
+          <div className="section-title compact form-section-title">
+            <h2>Mezclado</h2>
+            <p>Todos los datos asociados al amasado se registran juntos.</p>
+          </div>
+          <div className="form-grid">
             <Field label="Receta">
               <select value={input.receta} onChange={(event) => update("receta", event.target.value as RecipeKey)}>
                 {Object.entries(recipes).map(([key, label]) => (
@@ -631,15 +774,14 @@ export function ProcessAnalyzer() {
                 <option value="3">3</option>
               </select>
             </Field>
-            <Field label="Inicio de amasado">
-              <input type="time" value={input.horaInicioAmasado} onChange={(event) => update("horaInicioAmasado", event.target.value)} />
-            </Field>
-            <Field label="Horno">
-              <select value={input.horno} onChange={(event) => update("horno", event.target.value as ProcessInput["horno"])}>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-              </select>
+            <Field label="Mezclado">
+              <TimeRangeInput
+                start={input.horaInicioAmasado}
+                end={input.horaFinAmasado}
+                value={input.tiempoMezclado}
+                onStartChange={(value) => updateProcessTime("tiempoMezclado", "horaInicioAmasado", "horaFinAmasado", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoMezclado", "horaInicioAmasado", "horaFinAmasado", "end", value)}
+              />
             </Field>
             <Field label="Agregado">
               <select value={input.agregado} onChange={(event) => update("agregado", event.target.value as ProcessInput["agregado"])}>
@@ -656,18 +798,122 @@ export function ProcessAnalyzer() {
             <Field label="Peso pre-mezcla (g)">
               <NumberInput max={null} value={input.pesoPremezcla} onChange={(value) => update("pesoPremezcla", value)} />
             </Field>
+            <Field label="Temperatura de masa (°C)">
+              <NumberInput value={input.temperaturaMasa} onChange={(value) => update("temperaturaMasa", value)} />
+            </Field>
+          </div>
+
+          <div className="section-title compact form-section-title">
+            <h2>Resto de procesos</h2>
+            <p>La duración se calcula automáticamente con la hora de inicio y la hora final.</p>
+          </div>
+          <div className="form-grid times">
+            <Field label="Picado con reposo">
+              <TimeRangeInput
+                start={input.horaInicioPicado}
+                end={input.horaFinPicado}
+                value={input.tiempoPicado}
+                onStartChange={(value) => updateProcessTime("tiempoPicado", "horaInicioPicado", "horaFinPicado", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoPicado", "horaInicioPicado", "horaFinPicado", "end", value)}
+              />
+            </Field>
+            <Field label="Sobadora">
+              <OptionalTimeInput
+                start={input.horaInicioSobadora}
+                end={input.horaFinSobadora}
+                value={input.tiempoSobadora}
+                onModeChange={(value) => updateOptionalProcessMode("tiempoSobadora", "horaInicioSobadora", "horaFinSobadora", value)}
+                onStartChange={(value) => updateProcessTime("tiempoSobadora", "horaInicioSobadora", "horaFinSobadora", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoSobadora", "horaInicioSobadora", "horaFinSobadora", "end", value)}
+              />
+            </Field>
+            <Field label="Porcionado">
+              <TimeRangeInput
+                start={input.horaInicioPorcionado}
+                end={input.horaFinPorcionado}
+                value={input.tiempoPorcionado}
+                onStartChange={(value) => updateProcessTime("tiempoPorcionado", "horaInicioPorcionado", "horaFinPorcionado", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoPorcionado", "horaInicioPorcionado", "horaFinPorcionado", "end", value)}
+              />
+            </Field>
+            <Field label="Laminadora">
+              <OptionalTimeInput
+                start={input.horaInicioLaminadora}
+                end={input.horaFinLaminadora}
+                value={input.tiempoLaminadora}
+                disabled={!laminadoraAplica(input.producto)}
+                onModeChange={(value) => updateOptionalProcessMode("tiempoLaminadora", "horaInicioLaminadora", "horaFinLaminadora", value)}
+                onStartChange={(value) => updateProcessTime("tiempoLaminadora", "horaInicioLaminadora", "horaFinLaminadora", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoLaminadora", "horaInicioLaminadora", "horaFinLaminadora", "end", value)}
+              />
+            </Field>
+            <Field label="Boleado">
+              <TimeRangeInput
+                start={input.horaInicioBoleado}
+                end={input.horaFinBoleado}
+                value={input.tiempoBoleado}
+                onStartChange={(value) => updateProcessTime("tiempoBoleado", "horaInicioBoleado", "horaFinBoleado", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoBoleado", "horaInicioBoleado", "horaFinBoleado", "end", value)}
+              />
+            </Field>
             <Field label="Operarios boleando">
               <NumberInput integer value={input.operariosBoleado} onChange={(value) => update("operariosBoleado", value)} />
             </Field>
-            <Field label="Temperatura de masa (°C)">
-              <NumberInput value={input.temperaturaMasa} onChange={(value) => update("temperaturaMasa", value)} />
+            <Field label="Decorado">
+              <TimeRangeInput
+                start={input.horaInicioDecorado}
+                end={input.horaFinDecorado}
+                value={input.tiempoDecorado}
+                onStartChange={(value) => updateProcessTime("tiempoDecorado", "horaInicioDecorado", "horaFinDecorado", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoDecorado", "horaInicioDecorado", "horaFinDecorado", "end", value)}
+              />
+            </Field>
+            <Field label="Fermentación">
+              <TimeRangeInput
+                start={input.horaInicioFermentacion}
+                end={input.horaFinFermentacion}
+                value={input.tiempoFermentacion}
+                onStartChange={(value) => updateProcessTime("tiempoFermentacion", "horaInicioFermentacion", "horaFinFermentacion", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoFermentacion", "horaInicioFermentacion", "horaFinFermentacion", "end", value)}
+              />
+            </Field>
+            <Field label="Temperatura fermentadora (°C)">
+              <NumberInput value={input.temperaturaFermentadora} onChange={(value) => update("temperaturaFermentadora", value)} />
+            </Field>
+            <Field label="Humedad fermentadora (%)">
+              <NumberInput max={100} value={input.humedadFermentadora} onChange={(value) => update("humedadFermentadora", value)} />
+            </Field>
+            <Field label="Horno">
+              <select value={input.horno} onChange={(event) => update("horno", event.target.value as ProcessInput["horno"])}>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+              </select>
+            </Field>
+            <Field label="Tiempo en horno">
+              <TimeRangeInput
+                start={input.horaInicioHorno}
+                end={input.horaFinHorno}
+                value={input.tiempoHorno}
+                onStartChange={(value) => updateProcessTime("tiempoHorno", "horaInicioHorno", "horaFinHorno", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoHorno", "horaInicioHorno", "horaFinHorno", "end", value)}
+              />
             </Field>
             <Field label="Temperatura horno (°C)">
               <NumberInput value={input.temperaturaHorno} onChange={(value) => update("temperaturaHorno", value)} />
             </Field>
+            <Field label="Traslado a empaquetado">
+              <TimeRangeInput
+                start={input.horaInicioTraslado}
+                end={input.horaFinTraslado}
+                value={input.tiempoTraslado}
+                onStartChange={(value) => updateProcessTime("tiempoTraslado", "horaInicioTraslado", "horaFinTraslado", "start", value)}
+                onEndChange={(value) => updateProcessTime("tiempoTraslado", "horaInicioTraslado", "horaFinTraslado", "end", value)}
+              />
+            </Field>
           </div>
 
-          <div className="section-title compact">
+          <div className="section-title compact form-section-title">
             <h2>¿Hay algún equipo dañado?</h2>
             <p>Seleccione los equipos que no están funcionando.</p>
           </div>
@@ -681,35 +927,6 @@ export function ProcessAnalyzer() {
                 />
                 <span>{label}</span>
               </label>
-            ))}
-          </div>
-
-          <div className="section-title compact">
-            <h2>Tiempos del proceso</h2>
-          </div>
-          <div className="form-grid times">
-            {numberFields.slice(0, 2).map(([key, label]) => (
-              <Field key={key} label={`${label} (min)`}>
-                <NumberInput value={input[key]} onChange={(value) => update(key, value)} />
-              </Field>
-            ))}
-            <Field label="Sobadora (min)">
-              <OptionalTimeInput value={input.tiempoSobadora} onChange={(value) => update("tiempoSobadora", value)} />
-            </Field>
-            <Field label="Porcionado (min)">
-              <NumberInput value={input.tiempoPorcionado} onChange={(value) => update("tiempoPorcionado", value)} />
-            </Field>
-            <Field label="Laminadora (min)">
-              <OptionalTimeInput
-                value={input.tiempoLaminadora}
-                disabled={!laminadoraAplica(input.producto)}
-                onChange={(value) => update("tiempoLaminadora", value)}
-              />
-            </Field>
-            {numberFields.slice(3).map(([key, label]) => (
-              <Field key={key} label={`${label} (min)`}>
-                <NumberInput value={input[key]} onChange={(value) => update(key, value)} />
-              </Field>
             ))}
           </div>
         </form>
@@ -962,7 +1179,7 @@ export function ProcessAnalyzer() {
             <p className="eyebrow">Control de calidad</p>
             <h2>Registro de merma</h2>
           </div>
-          <p>Clasifique los lotes problemáticos y sus motivos.</p>
+          <p>Clasifique los lotes problemáticos e indique los kg perdidos por cada motivo.</p>
         </div>
         {history.length === 0 ? (
           <p className="empty">Guarde al menos un lote para registrar merma.</p>
@@ -992,18 +1209,29 @@ export function ProcessAnalyzer() {
               ) : null}
               <div className="waste-reasons">
                 {Object.entries(wasteReasons).map(([key, reason]) => (
-                  <label className="check-option" key={key}>
-                    <input
-                      type="checkbox"
-                      disabled={!wasteLotIsComplete || !wasteLot?.wasteReported}
-                      checked={wasteLot?.wasteReasons.includes(key as WasteReasonKey) ?? false}
-                      onChange={() => toggleWasteReason(key as WasteReasonKey)}
-                    />
-                    <span className="defect-copy">
-                      <strong>{reason.label}</strong>
-                      <small>{reason.description}</small>
-                    </span>
-                  </label>
+                  <div className="check-option waste-reason" key={key}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        disabled={!wasteLotIsComplete || !wasteLot?.wasteReported}
+                        checked={wasteLot?.wasteReasons.includes(key as WasteReasonKey) ?? false}
+                        onChange={() => toggleWasteReason(key as WasteReasonKey)}
+                      />
+                      <span className="defect-copy">
+                        <strong>{reason.label}</strong>
+                        <small>{reason.description}</small>
+                      </span>
+                    </label>
+                    <div className="waste-kg">
+                      <span>Kg perdidos</span>
+                      <NumberInput
+                        max={null}
+                        disabled={!wasteLotIsComplete || !wasteLot?.wasteReasons.includes(key as WasteReasonKey)}
+                        value={wasteLot?.wasteKg[key as WasteReasonKey] ?? null}
+                        onChange={(value) => updateWasteKg(key as WasteReasonKey, value)}
+                      />
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
