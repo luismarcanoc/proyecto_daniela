@@ -162,6 +162,7 @@ function exportExcel(history: SavedAnalysis[]) {
     "Temperatura área",
     "Humedad relativa",
     "Peso pre-mezcla",
+    "Peso esponja",
     "Operarios boleando",
     "Temperatura masa",
     "Inicio picado",
@@ -222,6 +223,7 @@ function exportExcel(history: SavedAnalysis[]) {
     item.input.temperaturaArea,
     item.input.humedadRelativa,
     item.input.pesoPremezcla,
+    item.input.pesoEsponja,
     item.input.operariosBoleado,
     item.input.temperaturaMasa,
     item.input.horaInicioPicado,
@@ -241,7 +243,7 @@ function exportExcel(history: SavedAnalysis[]) {
     item.input.tiempoBoleado,
     item.input.horaInicioDecorado,
     item.input.horaFinDecorado,
-    item.input.tiempoDecorado,
+    item.input.tiempoDecorado === "no_aplica" ? "No aplica" : item.input.tiempoDecorado,
     item.input.horaInicioFermentacion,
     item.input.horaFinFermentacion,
     item.input.tiempoFermentacion,
@@ -316,6 +318,7 @@ function NumberInput({
   max = 1000,
   integer = false,
   disabled = false,
+  step,
 }: {
   value: NumberField;
   onChange: (value: NumberField) => void;
@@ -323,13 +326,15 @@ function NumberInput({
   max?: number | null;
   integer?: boolean;
   disabled?: boolean;
+  step?: number | "any";
 }) {
   return (
     <input
       type="number"
       min={min}
       max={max ?? undefined}
-      step={integer ? 1 : "any"}
+      step={integer ? 1 : (step ?? "any")}
+      inputMode={integer ? "numeric" : "decimal"}
       disabled={disabled}
       value={value ?? ""}
       onChange={(event) => {
@@ -798,6 +803,9 @@ export function ProcessAnalyzer() {
             <Field label="Peso pre-mezcla (g)">
               <NumberInput max={null} value={input.pesoPremezcla} onChange={(value) => update("pesoPremezcla", value)} />
             </Field>
+            <Field label="Peso esponja (g)">
+              <NumberInput max={null} value={input.pesoEsponja} onChange={(value) => update("pesoEsponja", value)} />
+            </Field>
             <Field label="Temperatura de masa (°C)">
               <NumberInput value={input.temperaturaMasa} onChange={(value) => update("temperaturaMasa", value)} />
             </Field>
@@ -860,10 +868,11 @@ export function ProcessAnalyzer() {
               <NumberInput integer value={input.operariosBoleado} onChange={(value) => update("operariosBoleado", value)} />
             </Field>
             <Field label="Decorado">
-              <TimeRangeInput
+              <OptionalTimeInput
                 start={input.horaInicioDecorado}
                 end={input.horaFinDecorado}
                 value={input.tiempoDecorado}
+                onModeChange={(value) => updateOptionalProcessMode("tiempoDecorado", "horaInicioDecorado", "horaFinDecorado", value)}
                 onStartChange={(value) => updateProcessTime("tiempoDecorado", "horaInicioDecorado", "horaFinDecorado", "start", value)}
                 onEndChange={(value) => updateProcessTime("tiempoDecorado", "horaInicioDecorado", "horaFinDecorado", "end", value)}
               />
@@ -1226,6 +1235,7 @@ export function ProcessAnalyzer() {
                       <span>Kg perdidos</span>
                       <NumberInput
                         max={null}
+                        step={0.01}
                         disabled={!wasteLotIsComplete || !wasteLot?.wasteReasons.includes(key as WasteReasonKey)}
                         value={wasteLot?.wasteKg[key as WasteReasonKey] ?? null}
                         onChange={(value) => updateWasteKg(key as WasteReasonKey, value)}

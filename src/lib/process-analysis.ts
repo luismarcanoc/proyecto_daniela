@@ -35,6 +35,7 @@ export type ProcessInput = {
   horaFinAmasado: string;
   receta: RecipeKey;
   pesoPremezcla: NumberField;
+  pesoEsponja: NumberField;
   tiempoMezclado: NumberField;
   agregado: WaterMode;
   temperaturaMasa: NumberField;
@@ -60,7 +61,7 @@ export type ProcessInput = {
   humedadFermentadora: NumberField;
   horaInicioDecorado: string;
   horaFinDecorado: string;
-  tiempoDecorado: NumberField;
+  tiempoDecorado: OptionalProcessTime;
   horaInicioHorno: string;
   horaFinHorno: string;
   tiempoHorno: NumberField;
@@ -420,6 +421,7 @@ function missingAlerts(input: ProcessInput, alerts: string[]) {
     ["temperaturaArea", "temperatura del área"],
     ["humedadRelativa", "humedad relativa"],
     ["pesoPremezcla", "peso de pre-mezcla"],
+    ["pesoEsponja", "peso de esponja"],
     ["operariosBoleado", "cantidad de operarios boleando"],
     ["temperaturaMasa", "temperatura de masa"],
     ["tiempoMezclado", "tiempo de mezclado"],
@@ -429,7 +431,6 @@ function missingAlerts(input: ProcessInput, alerts: string[]) {
     ["tiempoFermentacion", "tiempo de fermentación"],
     ["temperaturaFermentadora", "temperatura de fermentadora"],
     ["humedadFermentadora", "humedad de fermentadora"],
-    ["tiempoDecorado", "tiempo de decorado"],
     ["tiempoHorno", "tiempo de horno"],
     ["temperaturaHorno", "temperatura de horno"],
     ["tiempoTraslado", "tiempo de traslado"],
@@ -443,6 +444,9 @@ function missingAlerts(input: ProcessInput, alerts: string[]) {
   }
   if (input.tiempoSobadora === null) {
     pushUnique(alerts, "Indique el tiempo de sobadora o seleccione No aplica.");
+  }
+  if (input.tiempoDecorado === null) {
+    pushUnique(alerts, "Indique el tiempo de decorado o seleccione No aplica.");
   }
 }
 
@@ -637,12 +641,13 @@ export function analyzeProcess(input: ProcessInput): AnalysisResult {
     if (item.id === "traslado") pushUnique(suggestions, "Coordine el traslado al salir del horno para no superar 5 min hacia empaquetado.");
   });
 
-  if (isNumber(input.operariosBoleado) && input.operariosBoleado < 8) {
-    pushUnique(alerts, "El boleado tiene menos de 8 operarios reportados.");
-    pushUnique(suggestions, "Use entre 8 y 10 operarios en boleado cuando el lote llegue a formado.");
+  const operatorRange = input.producto === "mini_40" ? { min: 10, max: 12 } : { min: 8, max: 10 };
+  if (isNumber(input.operariosBoleado) && input.operariosBoleado < operatorRange.min) {
+    pushUnique(alerts, `El boleado de ${productName} requiere entre ${operatorRange.min} y ${operatorRange.max} operarios.`);
+    pushUnique(suggestions, "Agregue más operarios al mesón de boleado cuando el lote llegue a formado.");
   }
-  if (isNumber(input.operariosBoleado) && input.operariosBoleado > 10) {
-    pushUnique(alerts, "El boleado tiene más de 10 operarios reportados.");
+  if (isNumber(input.operariosBoleado) && input.operariosBoleado > operatorRange.max) {
+    pushUnique(alerts, `El boleado de ${productName} supera el máximo de ${operatorRange.max} operarios.`);
     pushUnique(suggestions, "Si boleado ya está dentro de tiempo, mueva el excedente hacia porcionado o traslado.");
   }
   if (input.agregado === "hielo" && isNumber(input.temperaturaMasa) && input.temperaturaMasa < 28) {
@@ -687,7 +692,7 @@ function lotParts(stages: StageResult[]) {
     stageValue(stages, "porcionado"),
     stageValue(stages, "laminadora", true),
     stageValue(stages, "boleado"),
-    stageValue(stages, "decorado"),
+    stageValue(stages, "decorado", true),
   ];
   const oven = stageValue(stages, "horno");
   const transfer = stageValue(stages, "traslado");
@@ -919,6 +924,7 @@ export function defaultInput(): ProcessInput {
     horaFinAmasado: "",
     receta: "premezcla_6",
     pesoPremezcla: null,
+    pesoEsponja: null,
     tiempoMezclado: null,
     agregado: "agua",
     temperaturaMasa: null,
@@ -987,7 +993,7 @@ export function normalizeInput(input: Partial<ProcessInput>): ProcessInput {
       normalized.horaFinFermentacion,
       normalized.tiempoFermentacion,
     ),
-    tiempoDecorado: calculatedValue(normalized.horaInicioDecorado, normalized.horaFinDecorado, normalized.tiempoDecorado),
+    tiempoDecorado: optionalCalculatedValue(normalized.horaInicioDecorado, normalized.horaFinDecorado, normalized.tiempoDecorado),
     tiempoHorno: calculatedValue(normalized.horaInicioHorno, normalized.horaFinHorno, normalized.tiempoHorno),
     tiempoTraslado: calculatedValue(normalized.horaInicioTraslado, normalized.horaFinTraslado, normalized.tiempoTraslado),
   };
@@ -998,6 +1004,7 @@ export function isProcessComplete(input: ProcessInput) {
     input.temperaturaArea,
     input.humedadRelativa,
     input.pesoPremezcla,
+    input.pesoEsponja,
     input.operariosBoleado,
     input.temperaturaMasa,
     input.tiempoMezclado,
@@ -1007,7 +1014,6 @@ export function isProcessComplete(input: ProcessInput) {
     input.tiempoFermentacion,
     input.temperaturaFermentadora,
     input.humedadFermentadora,
-    input.tiempoDecorado,
     input.tiempoHorno,
     input.temperaturaHorno,
     input.tiempoTraslado,
@@ -1019,6 +1025,7 @@ export function isProcessComplete(input: ProcessInput) {
     input.horaInicioAmasado.trim() !== "" &&
     requiredNumbers.every(isNumber) &&
     input.tiempoSobadora !== null &&
+    input.tiempoDecorado !== null &&
     (!laminadoraAplica(input.producto) || input.tiempoLaminadora !== null)
   );
 }
